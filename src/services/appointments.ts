@@ -1,187 +1,195 @@
-import { supabase } from '@/lib/firebase';
-import type { Appointment, AppointmentStatus, AuditLog, Profile, UserRole } from '@/types';
+// src/services/appointmentService.ts
 
+import { db } from "@/lib/firebase";
+import {
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  doc,
+  updateDoc,
+  getDoc,
+  serverTimestamp
+} from "firebase/firestore";
+
+import type { Appointment, AppointmentStatus, AuditLog, Profile, UserRole } from "@/types";
+
+// ────────────────────────────────────────────────
+// 🔍 FETCH REFEREES FROM FIRESTORE
+// ────────────────────────────────────────────────
+export const fetchReferees = async (): Promise<Profile[]> => {
+  const q = query(collection(db, "users"), where("role", "==", "referee"));
+  const snap = await getDocs(q);
+
+  return snap.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  })) as Profile[];
+};
+
+// ────────────────────────────────────────────────
+// 🔍 FETCH PROFILE BY ID
+// ────────────────────────────────────────────────
+export const fetchProfileById = async (id: string): Promise<Profile | null> => {
+  const ref = doc(db, "users", id);
+  const snap = await getDoc(ref);
+
+  if (!snap.exists()) return null;
+
+  return {
+    id: snap.id,
+    ...snap.data(),
+  } as Profile;
+};
+
+// ────────────────────────────────────────────────
+// 📜 AUDIT LOG (SUBCOLLECTION STYLE)
+// ────────────────────────────────────────────────
 export const logAudit = async (
   appointmentId: string,
   actorId: string,
   actorRole: UserRole,
   action: string,
-  details?: Record<string, any>
+  details?: any
 ) => {
-  const { error } = await supabase.from('audit_logs').insert({
-    appointment_id: appointmentId,
-    actor_id: actorId,
-    actor_role: actorRole,
+  await addDoc(collection(db, "appointments", appointmentId, "auditTrail"), {
     action,
-    details: details ?? null,
+    by: actorId,
+    role: actorRole,
+    details: details ?? "",
+    timestamp: new Date().toISOString(),
   });
-  if (error) console.error('Audit log error:', error);
 };
 
+// ────────────────────────────────────────────────
+// 📅 FETCH COACH APPOINTMENTS
+// ────────────────────────────────────────────────
 export const fetchCoachAppointments = async (coachId: string): Promise<Appointment[]> => {
-  const { data, error } = await supabase
-    .from('appointments')
-    .select('*')
-    .eq('coach_id', coachId)
-    .order('match_date', { ascending: false });
-  if (error) throw error;
-  return (data as Appointment[]) || [];
+  const q = query(
+    collection(db, "appointments"),
+    where("createdBy", "==", coachId),
+    orderBy("createdAt", "desc")
+  );
+
+  const snap = await getDocs(q);
+
+  return snap.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  })) as Appointment[];
 };
 
+// ────────────────────────────────────────────────
+// 📅 FETCH REFEREE APPOINTMENTS
+// ────────────────────────────────────────────────
 export const fetchRefereeAppointments = async (refereeId: string): Promise<Appointment[]> => {
-  const { data, error } = await supabase
-    .from('appointments')
-    .select('*')
-    .eq('referee_id', refereeId)
-    .order('match_date', { ascending: false });
-  if (error) throw error;
-  return (data as Appointment[]) || [];
+  const q = query(
+    collection(db, "appointments"),
+    where("refereeId", "==", refereeId),
+    orderBy("createdAt", "desc")
+  );
+
+  const snap = await getDocs(q);
+
+  return snap.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  })) as Appointment[];
 };
 
-export const fetchReferees = async (): Promise<Profile[]> => {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('role', 'referee')
-    .order('full_name');
-  if (error) throw error;
-  return (data as Profile[]) || [];
-};
-
-export const fetchProfileById = async (id: string): Promise<Profile | null> => {
-  const { data } = await supabase.from('profiles').select('*').eq('id', id).maybeSingle();
-  return (data as Profile) || null;
-};
-
-// --- Email notifications ---
-type EmailType = 'assigned' | 'accepted' | 'rejected';
-
-interface NotifyArgs {
-  type: EmailType;
-  appointment: Appointment;
-  toProfile: Profile | null;
-  actorName?: string;
-}
-
-const sendEmailNotification = async (args: NotifyArgs): Promise<void> => {
-  if (!args.toProfile?.email) return;
-  try {
-    const portalUrl = typeof window !== 'undefined' ? window.location.origin : 'https://epru.famous.app';
-    await supabase.functions.invoke('send-appointment-email', {
-      body: {
-        type: args.type,
-        to_email: args.toProfile.email,
-        to_name: args.toProfile.full_name || undefined,
-        match_title: args.appointment.match_title,
-        venue: args.appointment.venue,
-        match_date: args.appointment.match_date,
-        competition: args.appointment.competition,
-        notes: args.appointment.notes,
-        feedback: args.appointment.feedback,
-        actor_name: args.actorName,
-        portal_url: portalUrl,
-      },
-    });
-  } catch (err) {
-    // Never fail the user-facing flow because of email
-    console.warn('Email notification failed (non-blocking):', err);
-  }
-};
-
+// ────────────────────────────────────────────────
+// ➕ CREATE APPOINTMENT (WITH REF DATA)
+// ────────────────────────────────────────────────
 export const createAppointment = async (
-  payload: Omit<Appointment, 'id' | 'created_at' | 'updated_at' | 'status' | 'feedback'>,
-  actor: { id: string; role: UserRole; full_name?: string | null }
+  payload: any,
+  actor: { id: string; role: UserRole; full_name?: string }
 ): Promise<Appointment> => {
-  const { data, error } = await supabase
-    .from('appointments')
-    .insert({ ...payload, status: 'pending' })
-    .select()
-    .single();
-  if (error) throw error;
 
-  const appointment = data as Appointment;
+  // 🔥 Fetch referee details from Firestore
+  const referee = await fetchProfileById(payload.refereeId);
 
-  await logAudit(appointment.id, actor.id, actor.role, 'CREATE_APPOINTMENT', {
-    match_title: payload.match_title,
-    referee_id: payload.referee_id,
+  const docRef = await addDoc(collection(db, "appointments"), {
+    ...payload,
+
+    referee: referee?.name || "",
+    refereeEmail: referee?.email || "",
+
+    status: "pending",
+
+    createdBy: actor.id,
+    appointedBy: actor.full_name || "",
+
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
 
-  // Notify the referee that they've been assigned
-  if (appointment.referee_id) {
-    const referee = await fetchProfileById(appointment.referee_id);
-    sendEmailNotification({
-      type: 'assigned',
-      appointment,
-      toProfile: referee,
-      actorName: actor.full_name || undefined,
-    });
-  }
+  await logAudit(docRef.id, actor.id, actor.role, "created", {
+    message: `Created appointment for ${referee?.name}`,
+  });
 
-  return appointment;
+  return {
+    id: docRef.id,
+    ...payload,
+  } as Appointment;
 };
 
+// ────────────────────────────────────────────────
+// 🔄 UPDATE STATUS
+// ────────────────────────────────────────────────
 export const updateAppointmentStatus = async (
   appointmentId: string,
   status: AppointmentStatus,
-  actor: { id: string; role: UserRole; full_name?: string | null },
+  actor: { id: string; role: UserRole },
   feedback?: string
-): Promise<void> => {
-  const update: any = { status, updated_at: new Date().toISOString() };
-  if (feedback !== undefined) update.feedback = feedback;
+) => {
 
-  const { data, error } = await supabase
-    .from('appointments')
-    .update(update)
-    .eq('id', appointmentId)
-    .select()
-    .single();
-  if (error) throw error;
+  const ref = doc(db, "appointments", appointmentId);
 
-  await logAudit(appointmentId, actor.id, actor.role, `STATUS_${status.toUpperCase()}`, { feedback });
+  await updateDoc(ref, {
+    status,
+    feedback: feedback || "",
+    updatedAt: serverTimestamp(),
+  });
 
-  // Notify the coach when referee accepts or rejects
-  if ((status === 'accepted' || status === 'rejected') && data) {
-    const appointment = data as Appointment;
-    const coach = await fetchProfileById(appointment.coach_id);
-    sendEmailNotification({
-      type: status,
-      appointment,
-      toProfile: coach,
-      actorName: actor.full_name || undefined,
-    });
-  }
+  await logAudit(appointmentId, actor.id, actor.role, status, {
+    feedback,
+  });
 };
 
+// ────────────────────────────────────────────────
+// 💬 SUBMIT FEEDBACK
+// ────────────────────────────────────────────────
 export const submitFeedback = async (
   appointmentId: string,
   feedback: string,
   actor: { id: string; role: UserRole }
-): Promise<void> => {
-  const { error } = await supabase
-    .from('appointments')
-    .update({ feedback, updated_at: new Date().toISOString() })
-    .eq('id', appointmentId);
-  if (error) throw error;
-  await logAudit(appointmentId, actor.id, actor.role, 'UPDATE_FEEDBACK', { feedback });
+) => {
+
+  const ref = doc(db, "appointments", appointmentId);
+
+  await updateDoc(ref, {
+    feedback,
+    updatedAt: serverTimestamp(),
+  });
+
+  await logAudit(appointmentId, actor.id, actor.role, "feedback", {
+    feedback,
+  });
 };
 
+// ────────────────────────────────────────────────
+// 📜 FETCH AUDIT TRAIL
+// ────────────────────────────────────────────────
 export const fetchAuditTrail = async (appointmentId: string): Promise<AuditLog[]> => {
-  const { data, error } = await supabase
-    .from('audit_logs')
-    .select('*')
-    .eq('appointment_id', appointmentId)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data as AuditLog[]) || [];
-};
 
-export const fetchUserAuditTrail = async (userId: string): Promise<AuditLog[]> => {
-  const { data, error } = await supabase
-    .from('audit_logs')
-    .select('*')
-    .eq('actor_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(100);
-  if (error) throw error;
-  return (data as AuditLog[]) || [];
+  const q = query(
+    collection(db, "appointments", appointmentId, "auditTrail"),
+    orderBy("timestamp", "desc")
+  );
+
+  const snap = await getDocs(q);
+
+  return snap.docs.map(doc => doc.data()) as AuditLog[];
 };
