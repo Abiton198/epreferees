@@ -1,17 +1,4 @@
-
 import React, { useEffect, useMemo, useState } from 'react';
-import DashboardHeader from './DashboardHeader';
-import StatusBadge from './StatusBadge';
-import AuditTrailDrawer from './AuditTrailDrawer';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { useAuth } from '@/contexts/AuthContext';
-import { updateAppointmentStatus, submitFeedback } from '@/services/appointments';
-import { toast } from '@/components/ui/use-toast';
-import type { Appointment, AppointmentStatus, AuditLog } from '@/types';
-import { Calendar, MapPin, Trophy, Check, X, MessageSquare, Loader2, Clock, ScrollText, History } from 'lucide-react';
-
 import {
   collection,
   query,
@@ -20,224 +7,380 @@ import {
   onSnapshot,
   doc,
   getDoc,
-  setDoc
+  setDoc,
+  updateDoc,
+  serverTimestamp
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useAuth } from '@/contexts/AuthContext';
+import { updateAppointmentStatus } from '@/services/appointments';
+import { toast } from '@/components/ui/use-toast';
+
+// UI Components
+import DashboardHeader from './DashboardHeader';
+import StatusBadge from './StatusBadge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter
+} from '@/components/ui/dialog';
+import {
+  Calendar,
+  MapPin,
+  Trophy,
+  Check,
+  X,
+  Loader2,
+  Clock,
+  UserCheck,
+  ChevronRight,
+  Info
+} from 'lucide-react';
+
+// Types
+import type { Appointment, AppointmentStatus } from '@/types';
 
 const RefereeDashboard: React.FC = () => {
-  const { profile } = useAuth();
+  const { user } = useAuth();
 
+  // State
   const [appts, setAppts] = useState<Appointment[]>([]);
-  const [history, setHistory] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isNewUser, setIsNewUser] = useState<boolean>(false);
   const [acting, setActing] = useState<string | null>(null);
-  const [auditId, setAuditId] = useState<string | null>(null);
 
-  const [feedbackTarget, setFeedbackTarget] = useState<Appointment | null>(null);
-  const [feedbackText, setFeedbackText] = useState('');
-  const [submittingFb, setSubmittingFb] = useState(false);
-
-  // 🔔 NEW APPOINTMENT POPUP STATE
+  // New Appointment Popup Logic
   const [newAppt, setNewAppt] = useState<Appointment | null>(null);
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
 
-  // 🧠 Ensure profile exists
-  const ensureUserProfile = async () => {
-    if (!profile) return;
+  /**
+   * 1. SYNC USER PROFILE
+   * Checks if user exists in Firestore, creates them if not, 
+   * and identifies if they should see the "New User" welcome screen.
+   */
+  const syncProfile = async () => {
+    if (!user) return;
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const snap = await getDoc(userRef);
 
-    const ref = doc(db, "users", profile.id);
-    const snap = await getDoc(ref);
-
-    if (!snap.exists()) {
-      await setDoc(ref, {
-        full_name: profile.full_name || "",
-        email: profile.email || "",
-        role: profile.role || "referee",
-        createdAt: new Date().toISOString(),
-      });
+      if (!snap.exists()) {
+        await setDoc(userRef, {
+          full_name: user.displayName || "Referee",
+          email: user.email || "",
+          role: "referee",
+          isNewUser: true,
+          status: "active",
+          approved: true,          // ← add this
+          createdAt: serverTimestamp(),
+          lastLogin: serverTimestamp(),
+          matchesOfficiated: 0,
+        });
+        setIsNewUser(true);
+      } else {
+        const data = snap.data();
+        setIsNewUser(data.isNewUser ?? false);
+        await updateDoc(userRef, { lastLogin: serverTimestamp() });
+      }
+    } catch (error) {
+      console.error("Error syncing profile:", error);
     }
   };
 
-  // ⚡ REAL-TIME LISTENERS
+  /**
+   * 2. REAL-TIME DATA LISTENER
+   */
   useEffect(() => {
-    if (!profile?.id) return;
-
-    let unsubAppts: any;
-    let unsubHistory: any;
+    if (!user?.uid) return;
+    let unsub: () => void;
 
     const init = async () => {
       setLoading(true);
-      await ensureUserProfile();
+      await syncProfile();
 
-      const apptQuery = query(
-        collection(db, "appointments"),
-        where("refereeId", "==", profile.id),
-        orderBy("createdAt", "desc")
-      );
+      try {
+        const q = query(
+          collection(db, "appointments"),
+          where("refereeId", "==", user.uid),
+          orderBy("createdAt", "desc")
+        );
 
-      unsubAppts = onSnapshot(apptQuery, (snap) => {
-        const list = snap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        })) as Appointment[];
+        unsub = onSnapshot(q,
+          (snap) => {
+            const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
+            setAppts(list);
 
-        setAppts(list);
-        setLoading(false);
-
-        // 🔔 Detect NEW appointments
-        list.forEach((a) => {
-          if (!seenIds.has(a.id) && a.status === "pending") {
-            setNewAppt(a);
-            setSeenIds((prev) => new Set(prev).add(a.id));
+            list.forEach(a => {
+              if (!seenIds.has(a.id) && a.status === "pending") {
+                setNewAppt(a);
+                setSeenIds(prev => new Set(prev).add(a.id));
+              }
+            });
+            setLoading(false);
+          },
+          (error) => {
+            console.error("❌ Firestore query error:", error);
+            setLoading(false); // ← unstick the loader on error
+            toast({ title: "Error loading appointments", description: error.message, variant: "destructive" });
           }
-        });
-      });
-
-      const historyQuery = query(
-        collection(db, "auditTrail"),
-        where("actor_id", "==", profile.id),
-        orderBy("created_at", "desc")
-      );
-
-      unsubHistory = onSnapshot(historyQuery, (snap) => {
-        const logs = snap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        })) as AuditLog[];
-
-        setHistory(logs);
-      });
+        );
+      } catch (err: any) {
+        console.error("❌ Init error:", err);
+        setLoading(false);
+      }
     };
 
     init();
+    return () => unsub?.();
+  }, [user?.uid]);
 
-    return () => {
-      if (unsubAppts) unsubAppts();
-      if (unsubHistory) unsubHistory();
-    };
-  }, [profile?.id]);
-
-  // ⚡ ACTIONS
-  const handleAction = async (appt: Appointment, status: AppointmentStatus) => {
-    if (!profile) return;
+  /**
+   * 3. ACTIONS
+   */
+  const handleUpdateStatus = async (appt: Appointment, status: AppointmentStatus) => {
+    if (!user) return;
     setActing(appt.id);
-
     try {
       await updateAppointmentStatus(appt.id, status, {
-        id: profile.id,
-        role: profile.role,
-        full_name: profile.full_name,
+        id: user.uid,
+        role: "referee",
+        full_name: user.displayName || "Referee",
       });
-
-      toast({ title: `Appointment ${status}`, description: appt.match_title });
-      setNewAppt(null);
+      toast({ title: `Successfully ${status}`, description: appt.match_title || "Appointment updated" });
+      setNewAppt(null); // Close dialog if it was open
     } catch (err: any) {
-      toast({ title: "Failed", description: err.message, variant: "destructive" });
+      toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
       setActing(null);
     }
   };
 
-  const handleFeedback = async () => {
-    if (!profile || !feedbackTarget) return;
-    setSubmittingFb(true);
-
-    try {
-      await submitFeedback(feedbackTarget.id, feedbackText, {
-        id: profile.id,
-        role: profile.role,
-      });
-
-      toast({ title: "Feedback submitted" });
-      setFeedbackTarget(null);
-      setFeedbackText("");
-    } catch (err: any) {
-      toast({ title: "Failed", description: err.message, variant: "destructive" });
-    } finally {
-      setSubmittingFb(false);
-    }
+  const handleCompleteOnboarding = async () => {
+    if (!user) return;
+    await updateDoc(doc(db, "users", user.uid), { isNewUser: false });
+    setIsNewUser(false);
   };
 
+  // 4. MEMOIZED STATS
   const stats = useMemo(() => ({
-    pending: appts.filter((a) => a.status === 'pending').length,
-    accepted: appts.filter((a) => a.status === 'accepted').length,
+    pending: appts.filter(a => a.status === 'pending').length,
+    accepted: appts.filter(a => a.status === 'accepted').length,
     total: appts.length,
   }), [appts]);
 
+  if (loading) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-gray-50">
+        <Loader2 className="animate-spin text-emerald-600 w-12 h-12 mb-4" />
+        <p className="text-gray-500 font-medium">Loading your dashboard...</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F8FAFC]">
       <DashboardHeader />
 
-      {/* 🔔 NEW APPOINTMENT MODAL */}
-      <Dialog open={!!newAppt}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New Match Assignment</DialogTitle>
-          </DialogHeader>
+      <main className="max-w-7xl mx-auto px-4 md:px-8 py-10">
 
-          {newAppt && (
-            <div className="space-y-3 text-sm">
-              <div><strong>{newAppt.match_title}</strong></div>
+        {isNewUser ? (
+          /* --- CUSTOMIZED VIEW: NEW USER --- */
+          <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
+            <div className="bg-emerald-600 p-8 text-white">
+              <h1 className="text-3xl font-bold">Welcome, {user?.displayName?.split(' ')[0]}!</h1>
+              <p className="mt-2 opacity-90 text-lg">Your referee profile is now active and ready for assignments.</p>
+            </div>
 
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4" />
-                {new Date(newAppt.match_date).toLocaleString()}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <MapPin className="w-4 h-4" />
-                {newAppt.venue}
-              </div>
-
-              {newAppt.competition && (
-                <div className="flex items-center gap-2">
-                  <Trophy className="w-4 h-4" />
-                  {newAppt.competition}
+            <div className="p-8 space-y-6">
+              <div className="grid md:grid-cols-2 gap-6">
+                <div className="flex gap-4 p-4 rounded-xl bg-gray-50">
+                  <div className="bg-emerald-100 p-3 rounded-lg h-fit"><Clock className="text-emerald-700" /></div>
+                  <div>
+                    <h3 className="font-bold text-gray-800">Pending Requests</h3>
+                    <p className="text-sm text-gray-500">New match assignments will appear here instantly.</p>
+                  </div>
                 </div>
-              )}
+                <div className="flex gap-4 p-4 rounded-xl bg-gray-50">
+                  <div className="bg-blue-100 p-3 rounded-lg h-fit"><UserCheck className="text-blue-700" /></div>
+                  <div>
+                    <h3 className="font-bold text-gray-800">Direct Contact</h3>
+                    <p className="text-sm text-gray-500">Coaches and Admins can now assign you to matches via your email.</p>
+                  </div>
+                </div>
+              </div>
 
-              {newAppt.notes && (
-                <div className="bg-gray-50 p-2 rounded border">
-                  {newAppt.notes}
+              <div className="bg-amber-50 border border-amber-100 p-4 rounded-lg flex gap-3">
+                <Info className="text-amber-600 shrink-0" />
+                <p className="text-sm text-amber-800 italic">
+                  Tip: Keep your dashboard open on Saturdays to receive and accept last-minute match changes.
+                </p>
+              </div>
+
+              <Button onClick={handleCompleteOnboarding} className="w-full py-6 text-lg bg-emerald-600 hover:bg-emerald-700">
+                Enter Dashboard <ChevronRight className="ml-2" />
+              </Button>
+            </div>
+          </div>
+        ) : (
+          /* --- CUSTOMIZED VIEW: RETURNING USER --- */
+          <>
+            <div className="mb-10">
+              <h1 className="text-4xl font-black text-slate-900 tracking-tight">Referee Dashboard</h1>
+              <p className="text-slate-500 mt-1">Manage your match assignments and schedule.</p>
+            </div>
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+              <StatCard label="Total Assignments" value={stats.total} icon={<Trophy className="w-5 h-5" />} color="blue" />
+              <StatCard label="Action Required" value={stats.pending} icon={<Clock className="w-5 h-5" />} color="amber" />
+              <StatCard label="Upcoming Confirmed" value={stats.accepted} icon={<Check className="w-5 h-5" />} color="emerald" />
+            </div>
+
+            {/* List Section */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                <h2 className="font-bold text-slate-800 uppercase tracking-wider text-sm">Recent Appointments</h2>
+              </div>
+
+              {appts.length === 0 ? (
+                <div className="p-20 text-center">
+                  <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Calendar className="text-slate-300 w-10 h-10" />
+                  </div>
+                  <h3 className="text-lg font-medium text-slate-900">No matches yet</h3>
+                  <p className="text-slate-500">When you are assigned to a match, it will appear here.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {appts.map((appt) => (
+                    <div key={appt.id} className="p-6 hover:bg-slate-50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-3">
+                          <span className="font-bold text-lg text-slate-900">
+                            {appt.homeTeam} vs {appt.awayTeam}
+                          </span>
+                          <StatusBadge status={appt.status} />
+                        </div>
+                        <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 mt-2">
+                          <div className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {appt.date} @ {appt.time}</div>
+                          <div className="flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {appt.venue}</div>
+                          <div className="flex items-center gap-1.5 font-medium text-emerald-600 uppercase text-xs tracking-tight bg-emerald-50 px-2 rounded">
+                            {appt.game}
+                          </div>
+                        </div>
+                      </div>
+
+                      {appt.status === 'pending' && (
+                        <div className="flex gap-2">
+                          <Button
+                            disabled={!!acting}
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleUpdateStatus(appt, 'rejected')}
+                            className="border-red-200 text-red-600 hover:bg-red-50"
+                          >
+                            <X className="w-4 h-4 mr-1" /> Decline
+                          </Button>
+                          <Button
+                            disabled={!!acting}
+                            size="sm"
+                            onClick={() => handleUpdateStatus(appt, 'accepted')}
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                          >
+                            <Check className="w-4 h-4 mr-1" /> Accept
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
+          </>
+        )}
+      </main>
+
+      {/* --- NOTIFICATION DIALOG FOR NEW ASSIGNMENTS --- */}
+      <Dialog open={!!newAppt} onOpenChange={(open) => !open && setNewAppt(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <span className="bg-emerald-100 p-2 rounded-full"><Trophy className="w-5 h-5 text-emerald-600" /></span>
+              New Match Assignment
+            </DialogTitle>
+          </DialogHeader>
+
+          {newAppt && (
+            <div className="py-4 space-y-4">
+              <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
+                <div className="text-center mb-4">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Matchup</p>
+                  <h4 className="text-xl font-black text-slate-900">{newAppt.homeTeam} vs {newAppt.awayTeam}</h4>
+                </div>
+
+                <div className="space-y-3 text-sm text-slate-600">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2"><Calendar className="w-4 h-4" /> Date:</span>
+                    <span className="font-semibold text-slate-900">{newAppt.date}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2"><Clock className="w-4 h-4" /> Kick-off:</span>
+                    <span className="font-semibold text-slate-900">{newAppt.time}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2"><MapPin className="w-4 h-4" /> Venue:</span>
+                    <span className="font-semibold text-slate-900">{newAppt.venue}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="grid grid-cols-2 gap-3 sm:justify-start">
             <Button
               variant="outline"
-              onClick={() => handleAction(newAppt!, "rejected")}
-              className="border-rose-300 text-rose-700"
+              disabled={!!acting}
+              onClick={() => handleUpdateStatus(newAppt!, "rejected")}
+              className="w-full"
             >
-              Reject
+              Decline
             </Button>
-
             <Button
-              onClick={() => handleAction(newAppt!, "accepted")}
-              className="bg-emerald-600"
+              disabled={!!acting}
+              onClick={() => handleUpdateStatus(newAppt!, "accepted")}
+              className="w-full bg-emerald-600 hover:bg-emerald-700"
             >
-              Accept
+              {acting === newAppt?.id ? <Loader2 className="animate-spin" /> : "Accept Match"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+};
 
-      {/* MAIN CONTENT (unchanged UI below) */}
-      <main className="max-w-7xl mx-auto px-4 md:px-8 py-8">
-        <h1 className="text-3xl font-black text-gray-900">Referee Dashboard</h1>
+/**
+ * Helper Sub-component for Stats
+ */
+const StatCard = ({ label, value, icon, color }: { label: string, value: number, icon: React.ReactNode, color: 'blue' | 'amber' | 'emerald' }) => {
+  const colors = {
+    blue: "border-l-blue-500 text-blue-600 bg-blue-50",
+    amber: "border-l-amber-500 text-amber-600 bg-amber-50",
+    emerald: "border-l-emerald-500 text-emerald-600 bg-emerald-50",
+  };
 
-        <div className="grid grid-cols-3 gap-4 mt-6 mb-8">
-          <div className="bg-white p-4 rounded">{stats.total} Total</div>
-          <div className="bg-white p-4 rounded">{stats.pending} Pending</div>
-          <div className="bg-white p-4 rounded">{stats.accepted} Accepted</div>
-        </div>
-      </main>
-
-      <AuditTrailDrawer appointmentId={auditId} onClose={() => setAuditId(null)} />
+  return (
+    <div className={`bg-white p-6 rounded-xl shadow-sm border border-slate-200 border-l-4 ${colors[color]}`}>
+      <div className="flex justify-between items-center mb-2">
+        <span className="text-slate-500 font-bold text-xs uppercase tracking-wider">{label}</span>
+        <div className="opacity-80">{icon}</div>
+      </div>
+      <div className="text-3xl font-black text-slate-900">{value}</div>
     </div>
   );
 };
 
 export default RefereeDashboard;
-
