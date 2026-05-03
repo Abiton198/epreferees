@@ -16,6 +16,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { db, auth } from "@/lib/firebase";
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import SetupProfileModal from './SetupProfileModal';
 
 interface Props {
   open: boolean;
@@ -38,66 +39,52 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<UserRole>('coach');
+  const [showSetup, setShowSetup] = useState(false);
+  const [tempUser, setTempUser] = useState<any>(null);
 
   /**
    * Helper: Handles post-auth logic for existing or new users
    */
   const handleUserRouting = async (firebaseUser: any, isRegistering: boolean) => {
-    console.log("🔥 handleUserRouting called", { uid: firebaseUser?.uid, isRegistering });
-
-    if (!firebaseUser?.uid) {
-      console.error("❌ No firebaseUser or uid!");
-      return;
-    }
+    if (!firebaseUser?.uid) return;
 
     const userRef = doc(db, "users", firebaseUser.uid);
     const snap = await getDoc(userRef);
-    console.log("📄 Firestore snap exists:", snap.exists(), snap.data());
 
     if (snap.exists()) {
       const data = snap.data();
-      console.log("👤 User data:", data);
-      console.log("🔀 isRegistering:", isRegistering);
 
-      if (isRegistering) {
-        setTab('login');
-        setStatusMessage("You are already a member! Please sign in below.");
+      // IF REFEREE & IS NEW -> Show setup instead of navigating
+      if (data.role === 'referee' && data.isNewUser) {
+        setTempUser(data);
+        setShowSetup(true);
         return;
       }
 
-      console.log("✅ Routing to:", `/dashboard/${data.role}`);
-      if (data.approved || data.role === 'coach' || data.role === 'referee') {
-        await updateDoc(userRef, { lastLogin: serverTimestamp() });
-        navigate(`/dashboard/${data.role}`);
-        onOpenChange(false);
-      } else {
-        console.warn("⛔ Not approved");
-        setStatusMessage("Your account is pending executive approval.");
-        await signOut(auth);
-      }
+      // Normal Dashboard routing
+      navigate(`/dashboard/${data.role}`);
+      onOpenChange(false);
     } else {
-      console.log("🆕 No doc found, isRegistering:", isRegistering);
-      if (!isRegistering) {
-        setStatusMessage("No account found. Please register first.");
-        await signOut(auth);
-        return;
-      }
-
-      await setDoc(userRef, {
+      // Logic for creating the initial doc...
+      const newUser = {
         uid: firebaseUser.uid,
         email: firebaseUser.email,
         full_name: fullName || firebaseUser.displayName || "",
         role: role,
-        isNewUser: true,
+        isNewUser: true, // This triggers the setup modal next time
         status: "active",
         approved: true,
         createdAt: serverTimestamp(),
-        lastLogin: serverTimestamp(),
-      });
+      };
+      await setDoc(userRef, newUser);
 
-      console.log("✅ New user created, navigating to:", `/dashboard/${role}`);
-      navigate(`/dashboard/${role}`);
-      onOpenChange(false);
+      if (role === 'referee') {
+        setTempUser(newUser);
+        setShowSetup(true);
+      } else {
+        navigate(`/dashboard/${role}`);
+        onOpenChange(false);
+      }
     }
   };
 
@@ -257,8 +244,24 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
           </TabsContent>
         </Tabs>
       </DialogContent>
+
+      {/* Place this outside the main Dialog but inside the component return */}
+      {showSetup && tempUser && (
+        <SetupProfileModal
+          open={showSetup}
+          uid={tempUser.uid}
+          onComplete={() => {
+            setShowSetup(false);
+            navigate(`/dashboard/referee`);
+            onOpenChange(false);
+          }}
+        />
+      )}
     </Dialog>
+
   );
+
 };
+
 
 export default LoginModal;

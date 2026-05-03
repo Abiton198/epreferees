@@ -227,6 +227,31 @@ const CoachDashboard: React.FC = () => {
     }
   };
 
+
+  const getStatusTimestamp = (appt: any) => {
+    console.log('auditTrail for', appt.id, appt.auditTrail);
+
+    if (!appt.auditTrail || appt.status === 'pending') return null;
+
+    const entry = [...appt.auditTrail]
+      .reverse()
+      .find(e => e.action === appt.status);
+
+    console.log('matched entry:', entry);
+
+    if (!entry || !entry.timestamp) return null;
+
+    const date = new Date(entry.timestamp);
+    return date.toLocaleString('en-ZA', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -369,8 +394,16 @@ const CoachDashboard: React.FC = () => {
                       </td>
 
                       <td className="px-6 py-4 text-center">
-                        <StatusBadge status={a.status as AppointmentStatus} />
+                        <div className="flex flex-col items-center gap-1">
+                          <StatusBadge status={a.status as AppointmentStatus} />
+                          {a.status !== 'pending' && (
+                            <span className="text-[10px] text-gray-500 italic">
+                              {getStatusTimestamp(a)}
+                            </span>
+                          )}
+                        </div>
                       </td>
+
                       <td className="px-6 py-4 text-right print:hidden">
                         <div className="flex items-center justify-end gap-1">
                           {/* Edit — only for pending */}

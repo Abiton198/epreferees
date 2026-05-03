@@ -141,21 +141,48 @@ const RefereeDashboard: React.FC = () => {
   /**
    * 3. ACTIONS
    */
-  const handleUpdateStatus = async (appt: Appointment, status: AppointmentStatus) => {
-    if (!user) return;
+  const handleUpdateStatus = async (appt: Appointment, newStatus: 'accepted' | 'rejected') => {
     setActing(appt.id);
     try {
-      await updateAppointmentStatus(appt.id, status, {
-        id: user.uid,
-        role: "referee",
-        refereeName: user.displayName || "Referee",
+      const docRef = doc(db, "appointments", appt.id);
+
+      await updateDoc(docRef, {
+        status: newStatus,
+        updatedAt: serverTimestamp(),
+        // Add to audit trail for tracking
+        auditTrail: [
+          ...(appt.auditTrail || []),
+          {
+            action: newStatus,
+            by: user?.uid,
+            byName: user?.displayName || 'Referee',
+            timestamp: new Date().toISOString(),
+          }
+        ]
       });
-      toast({ title: `Successfully ${status}`, description: appt.matchTitle || "Appointment updated" });
-      setNewAppt(null); // Close dialog if it was open
+
+      // Custom Toast for Acceptance
+      if (newStatus === 'accepted') {
+        toast({
+          title: "Match Accepted!",
+          description: "Get ready to be at the venue at least 1hr before the match, enjoy the game and fairplay",
+          className: "bg-emerald-50 border-emerald-200 text-emerald-900",
+        });
+      } else {
+        toast({
+          title: "Match Declined",
+          description: "The appointment has been removed from your pending list.",
+        });
+      }
+
     } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+      toast({
+        title: "Update failed",
+        description: err.message,
+        variant: "destructive",
+      });
     } finally {
-      setActing(null);
+      setActing(null); // This clears the loading state and effectively "closes" the action UI
     }
   };
 
