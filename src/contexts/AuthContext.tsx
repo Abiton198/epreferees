@@ -7,11 +7,13 @@ import {
   updateProfile,
   signOut as firebaseSignOut
 } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
+import { doc, getDoc } from "firebase/firestore";
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  role: string | null;
   signIn: (email: string, password: string) => Promise<any>;
   signUp: (email: string, password: string, fullName: string, role: string) => Promise<any>;
 }
@@ -19,6 +21,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
+  role: null,
   signIn: async () => { },
   signUp: async () => { },
 });
@@ -28,14 +31,23 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [role, setRole] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      setUser(firebaseUser);
+      if (firebaseUser) {
+        const snap = await getDoc(doc(db, "users", firebaseUser.uid));
+        setRole(snap.exists() ? snap.data().role ?? null : null);
+      } else {
+        setRole(null);
+      }
       setLoading(false);
     });
     return unsub;
   }, []);
+
+
 
   const signIn = (email: string, password: string) => {
     return signInWithEmailAndPassword(auth, email, password);
@@ -57,7 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp }}>
+    <AuthContext.Provider value={{ user, role, loading, signIn, signUp }}>
       {children}
     </AuthContext.Provider>
   );

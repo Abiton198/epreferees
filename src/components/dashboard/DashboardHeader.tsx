@@ -16,6 +16,7 @@ const EPRU_LOGO = 'https://d64gsuwffb70l.cloudfront.net/6864f2d65357bdbaf4000c36
 const DashboardHeader: React.FC = () => {
   const { profile, logout, user } = useAuth();
   const navigate = useNavigate();
+  const { role } = useAuth();
 
   // 1. Get First Name: Priority is profile.firstName -> profile.displayName -> Email Prefix
   const firstName = profile?.firstName ||
@@ -87,7 +88,7 @@ const DashboardHeader: React.FC = () => {
                     {firstName}
                   </div>
                   <div className="text-xs font-bold text-[#006747] bg-emerald-50 px-2 py-0.5 rounded mt-0.5 self-end capitalize">
-                    {profile?.role || 'Member'}
+                    {role || 'Member'}
                   </div>
                 </div>
 

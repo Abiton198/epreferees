@@ -45,6 +45,7 @@ import type { Appointment, AppointmentStatus } from '@/types';
 
 const RefereeDashboard: React.FC = () => {
   const { user } = useAuth();
+  const role = "referee";
 
   // State
   const [appts, setAppts] = useState<Appointment[]>([]);
