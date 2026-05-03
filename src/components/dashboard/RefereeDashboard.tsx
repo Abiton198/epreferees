@@ -69,19 +69,20 @@ const RefereeDashboard: React.FC = () => {
 
       if (!snap.exists()) {
         await setDoc(userRef, {
+          uid: user.uid,                         // Added UID field
           full_name: user.displayName || "Referee",
           email: user.email || "",
           role: "referee",
           isNewUser: true,
           status: "active",
-          approved: true,          // ← add this
+          approved: true,
           createdAt: serverTimestamp(),
           lastLogin: serverTimestamp(),
-          matchesOfficiated: 0,
         });
         setIsNewUser(true);
       } else {
         const data = snap.data();
+        // Update local state based on the field 'isNewUser' from your list
         setIsNewUser(data.isNewUser ?? false);
         await updateDoc(userRef, { lastLogin: serverTimestamp() });
       }
@@ -147,9 +148,9 @@ const RefereeDashboard: React.FC = () => {
       await updateAppointmentStatus(appt.id, status, {
         id: user.uid,
         role: "referee",
-        full_name: user.displayName || "Referee",
+        refereeName: user.displayName || "Referee",
       });
-      toast({ title: `Successfully ${status}`, description: appt.match_title || "Appointment updated" });
+      toast({ title: `Successfully ${status}`, description: appt.matchTitle || "Appointment updated" });
       setNewAppt(null); // Close dialog if it was open
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -265,10 +266,10 @@ const RefereeDashboard: React.FC = () => {
                           <StatusBadge status={appt.status} />
                         </div>
                         <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 mt-2">
-                          <div className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {appt.date} @ {appt.time}</div>
+                          <div className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {appt.matchDate} @ {appt.matchTime}</div>
                           <div className="flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {appt.venue}</div>
                           <div className="flex items-center gap-1.5 font-medium text-emerald-600 uppercase text-xs tracking-tight bg-emerald-50 px-2 rounded">
-                            {appt.game}
+                            {appt.competition}
                           </div>
                         </div>
                       </div>
@@ -324,11 +325,11 @@ const RefereeDashboard: React.FC = () => {
                 <div className="space-y-3 text-sm text-slate-600">
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-2"><Calendar className="w-4 h-4" /> Date:</span>
-                    <span className="font-semibold text-slate-900">{newAppt.date}</span>
+                    <span className="font-semibold text-slate-900">{newAppt.matchDate}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-2"><Clock className="w-4 h-4" /> Kick-off:</span>
-                    <span className="font-semibold text-slate-900">{newAppt.time}</span>
+                    <span className="font-semibold text-slate-900">{newAppt.matchTime}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-2"><MapPin className="w-4 h-4" /> Venue:</span>

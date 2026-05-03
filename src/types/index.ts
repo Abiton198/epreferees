@@ -5,24 +5,32 @@ export interface Profile {
   email: string;
   full_name: string | null;
   role: UserRole;
-  created_at: string;
+  status: string;
+  approved: boolean;
+  createdAt: string;
+  lastLogin: string;
 }
 
 export type AppointmentStatus = 'pending' | 'accepted' | 'rejected' | 'completed';
 
 export interface Appointment {
   id: string;
-  coach_id: string;
-  referee_id: string | null;
-  match_title: string;
+  coachId: string;
+  refereeId: string | null;
+  refereeName?: string;
+  coachName?: string;
+  homeTeam?: string;
+  awayTeam?: string;
+  matchDate: string;
+  matchTime: string;
+  matchTitle: string;
   venue: string;
-  match_date: string;
   competition: string | null;
   notes: string | null;
   status: AppointmentStatus;
   feedback: string | null;
-  created_at: string;
-  updated_at: string;
+  createdAt: string;
+  updatedAt: string;
   coach?: Profile;
   referee?: Profile;
 }
@@ -34,6 +42,6 @@ export interface AuditLog {
   actor_role: UserRole;
   action: string;
   details: Record<string, any> | null;
-  created_at: string;
+  createdAt: string;
   actor?: Profile;
 }

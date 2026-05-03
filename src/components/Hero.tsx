@@ -25,7 +25,7 @@ const Hero: React.FC = () => {
         <div className="flex items-center gap-3">
           <img src={EPRU_LOGO} alt="EPRU" className="h-12 w-12 rounded-full bg-white/95 p-1 shadow-lg" />
           <div className="hidden sm:block">
-            <div className="text-white font-bold text-lg leading-none">EPRU</div>
+            <div className="text-white font-bold text-lg leading-none">EPRRS</div>
             <div className="text-[#FFB81C] text-xs">Referee Management</div>
           </div>
         </div>

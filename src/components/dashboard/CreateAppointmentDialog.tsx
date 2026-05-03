@@ -1,125 +1,372 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
-import { createAppointment, fetchReferees } from '@/services/appointments';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2 } from 'lucide-react';
-import type { Profile } from '@/types';
+import {
+  Loader2, Search, X, ChevronDown, Clock, MapPin,
+  Users, Shield, Calendar, HelpCircle, Info,
+  Trophy, Flag, CheckCircle2, ChevronLeft, ChevronRight
+} from 'lucide-react';
+import { collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, query, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface Team {
+  id: string;
+  name: string;
+  homeGround?: string;
+}
+
+interface RefereeOption {
+  id: string;
+  full_name?: string;
+  fullName?: string;
+  displayName?: string;
+  name?: string;
+  email?: string;
+}
 
 interface Props {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onCreated: () => void;
+  editData?: any; // Pass this for EDIT mode
 }
 
-const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreated }) => {
-  const { profile } = useAuth();
-  const [referees, setReferees] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(false);
+const resolveName = (obj: any): string =>
+  obj?.full_name || obj?.fullName || obj?.displayName || obj?.name || obj?.email || 'Unknown';
 
-  const [matchTitle, setMatchTitle] = useState('');
-  const [venue, setVenue] = useState('');
-  const [matchDate, setMatchDate] = useState('');
-  const [competition, setCompetition] = useState('');
-  const [refereeId, setRefereeId] = useState<string>('');
-  const [notes, setNotes] = useState('');
+// ─── Component ──────────────────────────────────────────────────────────────
+
+const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreated, editData }) => {
+  const { user, profile } = useAuth() as any;
+
+  // Data States
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [referees, setReferees] = useState<RefereeOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [fetchingData, setFetchingData] = useState(false);
+  const [step, setStep] = useState(1);
+
+  // Form States (Combined for easy reset/edit)
+  const [formData, setFormData] = useState({
+    competitionType: '' as 'club' | 'school' | 'tournament' | '',
+    competitionName: '',
+    teamAId: '',
+    teamAManual: '',
+    teamBId: '',
+    teamBManual: '',
+    teamLevel: 'main',
+    matchDate: '',
+    matchTime: '',
+    venue: '',
+    refereeId: '',
+    refereeRole: 'referee' as 'referee' | 'assistant',
+    notes: ''
+  });
+
+  const isClub = formData.competitionType === 'club';
+
+  // ─── Initialization ────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (open) {
-      fetchReferees().then(setReferees).catch(() => setReferees([]));
-    }
-  }, [open]);
+    if (!open) return;
 
-  const reset = () => {
-    setMatchTitle(''); setVenue(''); setMatchDate(''); setCompetition(''); setRefereeId(''); setNotes('');
+    const fetchData = async () => {
+      setFetchingData(true);
+      try {
+        // 1. Fetch from all possible sources
+        const [teamsSnap, refSnap, usersSnap] = await Promise.all([
+          getDocs(collection(db, 'teams')),
+          getDocs(collection(db, 'referees')),
+          getDocs(query(collection(db, 'users'), where('role', '==', 'referee'))),
+        ]);
+
+        setTeams(teamsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Team)));
+
+        // 2. Map old referees collection
+        const refs = refSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            // Support both naming conventions
+            displayName: data.full_name || data.displayName || data.name || 'Unnamed Ref'
+          };
+        });
+
+        // 3. Map new users collection (already filtered by role in the query)
+        const refUsers = usersSnap.docs.map(d => {
+          const data = d.data();
+          return {
+            // Check the doc ID, then the uid field, then fallback to a random string
+            id: d.id || data.uid || data.id,
+            ...data,
+            displayName: data.full_name || data.displayName || 'Unnamed Ref'
+          };
+        });
+
+        // 4. Merge and de-duplicate by ID
+        // We use a Map where the Key is the ID to ensure each referee appears only once
+        const combinedMap = new Map();
+        [...refs, ...refUsers].forEach(r => combinedMap.set(r.id, r));
+
+        const uniqueRefs = Array.from(combinedMap.values());
+        setReferees(uniqueRefs);
+
+        // 5. Handle Edit Mode pre-fill with camelCase support
+        if (editData) {
+          setFormData({
+            competitionType: editData.competitionType || '',
+            competitionName: editData.competition || '',
+            teamAId: editData.homeTeamId || '',
+            teamAManual: !editData.homeTeamId ? editData.homeTeam : '',
+            teamBId: editData.awayTeamId || '',
+            teamBManual: !editData.awayTeamId ? editData.awayTeam : '',
+            teamLevel: editData.teamLevel || 'main',
+            // Prioritize camelCase (matchDate) but fallback to snake_case (date)
+            matchDate: editData.matchDate || editData.date || '',
+            matchTime: editData.matchTime || editData.time || '',
+            venue: editData.venue || '',
+            refereeId: editData.refereeId || '',
+            refereeRole: editData.refereeRole || 'referee',
+            notes: editData.notes || ''
+          });
+        }
+      } catch (err) {
+        console.error('Fetch error:', err);
+      } finally {
+        setFetchingData(false);
+      }
+    };
+
+    fetchData();
+  }, [open, editData]);
+
+  // ─── Logic ──────────────────────────────────────────────────────────────────
+
+  const validateStep = () => {
+    switch (step) {
+      case 1: return !!formData.competitionType;
+      case 2:
+        if (isClub) return !!formData.teamAId && !!formData.teamBId;
+        return !!formData.teamAManual && !!formData.teamBManual;
+      case 3: return !!formData.matchDate && !!formData.matchTime && !!formData.venue;
+      default: return true;
+    }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!profile) return;
+  const handleSubmit = async () => {
+    if (loading) return;
     setLoading(true);
-    try {
-      await createAppointment(
-        {
-          coach_id: profile.id,
-          referee_id: refereeId || null,
-          match_title: matchTitle,
-          venue,
-          match_date: new Date(matchDate).toISOString(),
-          competition: competition || null,
-          notes: notes || null,
-        },
-        { id: profile.id, role: profile.role, full_name: profile.full_name }
 
-      );
-      toast({ title: 'Appointment created', description: 'Referee has been notified.' });
-      reset();
-      onOpenChange(false);
+    try {
+      const selectedTeamA = teams.find(t => t.id === formData.teamAId);
+      const selectedTeamB = teams.find(t => t.id === formData.teamBId);
+      const assignedRef = referees.find(r => r.id === formData.refereeId);
+
+      const homeName = isClub ? selectedTeamA?.name : formData.teamAManual;
+      const awayName = isClub ? selectedTeamB?.name : formData.teamBManual;
+
+      const payload = {
+        ...formData,
+        competition: formData.competitionName || formData.competitionType,
+        homeTeam: homeName,
+        awayTeam: awayName,
+        matchTitle: `${homeName} vs ${awayName}`,
+        refereeName: assignedRef ? resolveName(assignedRef) : null,
+        refereeEmail: assignedRef?.email || null,
+        coachId: profile?.id || user?.uid,
+        coachName: profile?.firstName || profile?.displayName || 'Coach',
+        status: editData ? editData.status : 'pending',
+        updatedAt: serverTimestamp(),
+      };
+
+      if (editData?.id) {
+        await updateDoc(doc(db, 'appointments', editData.id), payload);
+        toast({ title: "Success", description: "Appointment updated successfully" });
+      } else {
+        await addDoc(collection(db, 'appointments'), {
+          ...payload,
+          createdAt: serverTimestamp()
+        });
+        toast({ title: "Success", description: "Appointment created successfully" });
+      }
+
       onCreated();
+      onOpenChange(false);
     } catch (err: any) {
-      toast({ title: 'Failed', description: err.message, variant: 'destructive' });
+      toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
 
+  // ─── Render Helpers ─────────────────────────────────────────────────────────
+
+  const updateField = (field: string, value: any) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Create New Appointment</DialogTitle>
+      <DialogContent className="sm:max-w-2xl p-0 overflow-hidden bg-white">
+        <DialogHeader className="bg-[#006747] p-6 text-white">
+          <DialogTitle className="flex items-center gap-2 text-xl">
+            {editData ? <Shield size={20} /> : <Trophy size={20} />}
+            {editData ? 'Edit Appointment' : 'Create New Appointment'}
+          </DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-          <div>
-            <Label>Match Title</Label>
-            <Input required value={matchTitle} onChange={(e) => setMatchTitle(e.target.value)} placeholder="e.g. EP Kings vs Sharks U21" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Venue</Label>
-              <Input required value={venue} onChange={(e) => setVenue(e.target.value)} placeholder="Nelson Mandela Bay Stadium" />
-            </div>
-            <div>
-              <Label>Competition</Label>
-              <Input value={competition} onChange={(e) => setCompetition(e.target.value)} placeholder="Currie Cup" />
-            </div>
-          </div>
-          <div>
-            <Label>Match Date & Time</Label>
-            <Input type="datetime-local" required value={matchDate} onChange={(e) => setMatchDate(e.target.value)} />
-          </div>
-          <div>
-            <Label>Assign Referee</Label>
-            <Select value={refereeId} onValueChange={setRefereeId}>
-              <SelectTrigger>
-                <SelectValue placeholder={referees.length ? 'Select a referee' : 'No referees registered yet'} />
-              </SelectTrigger>
-              <SelectContent>
-                {referees.map((r) => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.full_name} — {r.email}
-                  </SelectItem>
+
+        {/* Step Indicator */}
+        <div className="flex border-b">
+          {[1, 2, 3, 4].map((s) => (
+            <div key={s} className={`flex-1 h-1.5 ${step >= s ? 'bg-[#006747]' : 'bg-slate-100'}`} />
+          ))}
+        </div>
+
+        <div className="p-8 min-h-[400px]">
+          {/* STEP 1: Type Selection */}
+          {step === 1 && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+              <Label className="text-lg font-bold">Select Competition Category</Label>
+              <div className="grid grid-cols-1 gap-4">
+                {['club', 'school', 'tournament'].map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => updateField('competitionType', type)}
+                    className={`p-4 border-2 rounded-xl text-left transition-all ${formData.competitionType === type
+                      ? 'border-[#006747] bg-emerald-50'
+                      : 'border-slate-200 hover:border-slate-400'
+                      }`}
+                  >
+                    <span className="font-bold capitalize">{type} Match</span>
+                    <p className="text-sm text-slate-500">
+                      {type === 'club' ? 'Select teams from the existing EP database.' : 'Enter custom names for non-club fixtures.'}
+                    </p>
+                  </button>
                 ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Notes</Label>
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Any special instructions..." />
-          </div>
-          <div className="flex gap-2 justify-end pt-2">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" className="bg-[#006747] hover:bg-[#004d35]" disabled={loading}>
-              {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              Create Appointment
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: Team Selection */}
+          {step === 2 && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Home Team (A)</Label>
+                  {isClub ? (
+                    <select
+                      className="w-full p-2 border rounded-md"
+                      value={formData.teamAId}
+                      onChange={(e) => {
+                        const t = teams.find(x => x.id === e.target.value);
+                        updateField('teamAId', e.target.value);
+                        if (t?.homeGround) updateField('venue', t.homeGround);
+                      }}
+                    >
+                      <option value="">Select Club...</option>
+                      {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  ) : (
+                    <Input value={formData.teamAManual} onChange={(e) => updateField('teamAManual', e.target.value)} placeholder="Enter school/team name" />
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label>Away Team (B)</Label>
+                  {isClub ? (
+                    <select
+                      className="w-full p-2 border rounded-md"
+                      value={formData.teamBId}
+                      onChange={(e) => updateField('teamBId', e.target.value)}
+                    >
+                      <option value="">Select Club...</option>
+                      {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  ) : (
+                    <Input value={formData.teamBManual} onChange={(e) => updateField('teamBManual', e.target.value)} placeholder="Enter school/team name" />
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3: Logistics */}
+          {step === 3 && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Date</Label>
+                  <Input type="date" value={formData.matchDate} onChange={(e) => updateField('matchDate', e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Time</Label>
+                  <Input type="time" value={formData.matchTime} onChange={(e) => updateField('matchTime', e.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Venue / Ground</Label>
+                <Input value={formData.venue} onChange={(e) => updateField('venue', e.target.value)} placeholder="Where is the match?" />
+              </div>
+            </div>
+          )}
+
+          {/* STEP 4: Assignment */}
+          {step === 4 && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+              <div className="space-y-2">
+                <Label>Assign Referee (Optional)</Label>
+                <select
+                  className="w-full p-2 border rounded-md"
+                  value={formData.refereeId}
+                  onChange={(e) => updateField('refereeId', e.target.value)}
+                >
+                  <option value="">Leave Unassigned</option>
+                  {referees.map(r => <option key={r.id} value={r.id}>{resolveName(r)}</option>)}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>Additional Notes</Label>
+                <Textarea value={formData.notes} onChange={(e) => updateField('notes', e.target.value)} placeholder="Kit colors, parking info, etc." />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Navigation */}
+        <div className="flex items-center justify-between p-6 bg-slate-50 border-t">
+          <Button
+            variant="outline"
+            onClick={() => step === 1 ? onOpenChange(false) : setStep(step - 1)}
+          >
+            {step === 1 ? 'Cancel' : <><ChevronLeft className="mr-2 h-4 w-4" /> Back</>}
+          </Button>
+
+          {step < 4 ? (
+            <Button
+              className="bg-[#006747] hover:bg-[#004d35]"
+              disabled={!validateStep()}
+              onClick={() => setStep(step + 1)}
+            >
+              Next <ChevronRight className="ml-2 h-4 w-4" />
             </Button>
-          </div>
-        </form>
+          ) : (
+            <Button
+              className="bg-[#006747] hover:bg-[#004d35] px-8"
+              disabled={loading}
+              onClick={handleSubmit}
+            >
+              {loading ? <Loader2 className="animate-spin" /> : (editData ? 'Update Appointment' : 'Create Appointment')}
+            </Button>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

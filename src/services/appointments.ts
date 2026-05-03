@@ -113,7 +113,7 @@ export const createAppointment = async (
   const docRef = await addDoc(collection(db, "appointments"), {
     ...payload,
 
-    referee: referee?.name || "",
+    referee: referee?.full_name || "",
     refereeEmail: referee?.email || "",
 
     status: "pending",
@@ -126,7 +126,7 @@ export const createAppointment = async (
   });
 
   await logAudit(docRef.id, actor.id, actor.role, "created", {
-    message: `Created appointment for ${referee?.name}`,
+    message: `Created appointment for ${referee?.full_name}`,
   });
 
   return {
@@ -192,4 +192,19 @@ export const fetchAuditTrail = async (appointmentId: string): Promise<AuditLog[]
   const snap = await getDocs(q);
 
   return snap.docs.map(doc => doc.data()) as AuditLog[];
+};
+
+// ────────────────────────────────────────────────
+// 🔍 FETCH TEAM DATA
+// ────────────────────────────────────────────────
+export const fetchTeamData = async (teamId: string): Promise<Team | null> => {
+  const ref = doc(db, "teams", teamId);
+  const snap = await getDoc(ref);
+
+  if (!snap.exists()) return null;
+
+  return {
+    id: snap.id,
+    ...snap.data(),
+  } as Team;
 };

@@ -14,15 +14,26 @@ import {
 const EPRU_LOGO = 'https://d64gsuwffb70l.cloudfront.net/6864f2d65357bdbaf4000c36_1777732607060_9ef1fbe3.png';
 
 const DashboardHeader: React.FC = () => {
-  const { profile, logout } = useAuth();
+  const { profile, logout, user } = useAuth();
   const navigate = useNavigate();
+
+  // 1. Get First Name: Priority is profile.firstName -> profile.displayName -> Email Prefix
+  const firstName = profile?.firstName ||
+    profile?.displayName?.split(' ')[0] ||
+    user?.email?.split('@')[0] ||
+    'User';
+
+  // 2. Full Name for the dropdown
+  const fullName = profile?.displayName || profile?.fullName || user?.email?.split('@')[0] || 'User';
+
+  // 3. Profile Pic: Uses the official Google/Firebase photo if available, otherwise generated avatar
+  const profilePic = user?.photoURL;
 
   const handleLogout = async () => {
     if (logout) {
       await logout();
       navigate('/');
     } else {
-      // Emergency Fallback: If context fails, call Firebase directly
       import("@/lib/firebase").then(({ auth }) => {
         import("firebase/auth").then(({ signOut }) => {
           signOut(auth).then(() => navigate('/'));
@@ -30,6 +41,7 @@ const DashboardHeader: React.FC = () => {
       });
     }
   };
+
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm print:hidden">
       <div className="max-w-7xl mx-auto px-4 md:px-8 py-3 flex items-center justify-between">
@@ -54,7 +66,6 @@ const DashboardHeader: React.FC = () => {
         {/* Right Section: User Profile & Navigation */}
         <div className="flex items-center gap-4">
 
-          {/* Quick Nav: Home */}
           <Button
             variant="ghost"
             size="sm"
@@ -73,7 +84,7 @@ const DashboardHeader: React.FC = () => {
               <button className="flex items-center gap-3 group focus:outline-none">
                 <div className="text-right flex flex-col justify-center">
                   <div className="text-sm font-black text-gray-900 group-hover:text-[#006747] transition-colors">
-                    {profile?.full_name || 'User Name'}
+                    {firstName}
                   </div>
                   <div className="text-xs font-bold text-[#006747] bg-emerald-50 px-2 py-0.5 rounded mt-0.5 self-end capitalize">
                     {profile?.role || 'Member'}
@@ -81,9 +92,17 @@ const DashboardHeader: React.FC = () => {
                 </div>
 
                 <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#006747] to-[#004d35] text-white flex items-center justify-center font-black border-2 border-white shadow-md">
-                    {profile?.full_name?.charAt(0).toUpperCase() ?? 'U'}
-                  </div>
+                  {profilePic ? (
+                    <img
+                      src={profilePic}
+                      alt="Profile"
+                      className="w-10 h-10 rounded-full border-2 border-white shadow-md object-cover"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#006747] to-[#004d35] text-white flex items-center justify-center font-black border-2 border-white shadow-md">
+                      {firstName.charAt(0).toUpperCase()}
+                    </div>
+                  )}
                   <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 shadow-sm border border-gray-100">
                     <ChevronDown className="w-3 h-3 text-gray-400" />
                   </div>
@@ -92,9 +111,10 @@ const DashboardHeader: React.FC = () => {
             </DropdownMenuTrigger>
 
             <DropdownMenuContent align="end" className="w-56 mt-2">
-              <div className="p-2 px-3">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Signed in as</p>
-                <p className="text-sm font-bold text-gray-700 truncate">{profile?.email}</p>
+              <div className="p-3 bg-gray-50/50">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Signed in as</p>
+                <p className="text-sm font-bold text-gray-700 truncate">{fullName}</p>
+                <p className="text-xs text-gray-500 truncate">{user?.email}</p>
               </div>
               <DropdownMenuSeparator />
 
@@ -103,9 +123,9 @@ const DashboardHeader: React.FC = () => {
                 Return to Home
               </DropdownMenuItem>
 
-              <DropdownMenuItem className="cursor-pointer">
+              <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/profile')}>
                 <User className="w-4 h-4 mr-2 text-gray-400" />
-                View Profile
+                My Profile
               </DropdownMenuItem>
 
               <DropdownMenuSeparator />
@@ -120,7 +140,6 @@ const DashboardHeader: React.FC = () => {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-
       </div>
     </header>
   );
