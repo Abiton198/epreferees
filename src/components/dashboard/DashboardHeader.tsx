@@ -28,7 +28,10 @@ const DashboardHeader: React.FC = () => {
   const fullName = profile?.displayName || profile?.fullName || user?.email?.split('@')[0] || 'User';
 
   // 3. Profile Pic: Uses the official Google/Firebase photo if available, otherwise generated avatar
-  const profilePic = user?.photoURL;
+  const profilePic =
+    profile?.profileImage ||   // Firestore (your app upload)
+    user?.photoURL ||          // Google Auth
+    null;
 
   const handleLogout = async () => {
     if (logout) {
