@@ -56,6 +56,17 @@ const RefereeDashboard: React.FC = () => {
   // New Appointment Popup Logic
   const [newAppt, setNewAppt] = useState<Appointment | null>(null);
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
+ 
+
+// Helper — merges two appointment arrays, deduplicates by id, sorts by createdAt
+const mergeAppointments = (a: Appointment[], b: Appointment[]): Appointment[] => {
+  const map = new Map<string, Appointment>();
+  [...a, ...b].forEach(appt => map.set(appt.id, appt));
+  return Array.from(map.values()).sort((x, y) => {
+    const ts = (a: Appointment) => a.createdAt?.seconds ?? 0;
+    return ts(y) - ts(x);
+  });
+};
 
   /**
    * 1. SYNC USER PROFILE
@@ -96,48 +107,121 @@ const RefereeDashboard: React.FC = () => {
    * 2. REAL-TIME DATA LISTENER
    */
   useEffect(() => {
-    if (!user?.uid) return;
-    let unsub: () => void;
+  if (!user?.uid) return;
 
-    const init = async () => {
-      setLoading(true);
-      await syncProfile();
+  const unsubs: (() => void)[] = [];
+  let listById: Appointment[] = [];
+  let listByName: Appointment[] = [];
+  let listByEmail: Appointment[] = [];
 
-      try {
-        const q = query(
-          collection(db, "appointments"),
-          where("refereeId", "==", user.uid),
-          orderBy("createdAt", "desc")
-        );
+ const handleMerge = () => {
+  const merged = mergeAppointments(
+    mergeAppointments(listById, listByName),
+    listByEmail
+  );
 
-        unsub = onSnapshot(q,
-          (snap) => {
-            const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
-            setAppts(list);
+  setAppts(merged);
 
-            list.forEach(a => {
-              if (!seenIds.has(a.id) && a.status === "pending") {
-                setNewAppt(a);
-                setSeenIds(prev => new Set(prev).add(a.id));
-              }
-            });
-            setLoading(false);
-          },
-          (error) => {
-            console.error("❌ Firestore query error:", error);
-            setLoading(false); // ← unstick the loader on error
-            toast({ title: "Error loading appointments", description: error.message, variant: "destructive" });
-          }
-        );
-      } catch (err: any) {
-        console.error("❌ Init error:", err);
-        setLoading(false);
-      }
-    };
+  merged.forEach(a => {
+    if (!seenIds.has(a.id) && a.status === 'pending') {
+      setNewAppt(a);
+      setSeenIds(prev => new Set(prev).add(a.id));
+    }
+  });
+};
 
-    init();
-    return () => unsub?.();
-  }, [user?.uid]);
+  const init = async () => {
+    setLoading(true);
+    await syncProfile();
+
+    try {
+      // ── Query 1: by refereeId (UID) — primary ──────────────────────────
+      // Requires index: refereeId ASC + createdAt DESC
+      const q1 = query(
+        collection(db, "appointments"),
+        where("refereeId", "==", user.uid),
+        orderBy("createdAt", "desc")
+      );
+
+      // ── Query 2: by refereeName — fallback (survives UID changes) ──────
+      // Requires index: refereeName ASC + createdAt DESC
+      const q2 = query(
+        collection(db, "appointments"),
+        where("refereeName", "==", user.displayName ?? ""),
+        orderBy("createdAt", "desc")
+      );
+
+      const q3 = query(
+  collection(db, "appointments"),
+  where("refereeEmail", "==", user.email ?? ""),
+  orderBy("createdAt", "desc")
+);
+
+      let q1Ready = false;
+      let q2Ready = false;
+      let q3Ready = false;
+
+      const unsub1 = onSnapshot(q1,
+        (snap) => {
+          listById = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
+          q1Ready = true;
+          if (q1Ready && q2Ready && q3Ready) { setLoading(false); }
+          handleMerge();
+        },
+        (error) => {
+          console.error("❌ Query-by-ID error:", error.code, error.message);
+          q1Ready = true;
+          if (q1Ready && q2Ready) setLoading(false);
+          toast({ title: "Error (ID query)", description: error.message, variant: "destructive" });
+        }
+      );
+
+      const unsub2 = onSnapshot(q2,
+        (snap) => {
+          listByName = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
+          q2Ready = true;
+          if (q1Ready && q2Ready) { setLoading(false); }
+          handleMerge();
+        },
+        (error) => {
+          console.error("❌ Query-by-name error:", error.code, error.message);
+          q2Ready = true;
+          if (q1Ready && q2Ready) setLoading(false);
+          // Name query failing is non-fatal — silently continue
+        }
+      );
+
+      const unsub3 = onSnapshot(q3,
+        (snap) => {
+          listByEmail = snap.docs.map(d => ({
+            id: d.id,
+            ...d.data()
+          })) as Appointment[];
+
+             q3Ready = true;
+
+          handleMerge();
+        },
+        (error) => {
+          console.error("❌ Query-by-email error:", error);
+        }
+);
+
+      unsubs.push(unsub1, unsub2, unsub3);
+    } catch (err: any) {
+      console.error("❌ Init error:", err);
+      setLoading(false);
+    }
+  };
+
+  init();
+  return () => unsubs.forEach(fn => fn());
+}, [user?.uid]);
+
+console.log("CURRENT USER");
+console.log(user?.uid);
+console.log(user?.email);
+console.log(user?.displayName);
 
   /**
    * 3. ACTIONS
@@ -147,20 +231,21 @@ const RefereeDashboard: React.FC = () => {
     try {
       const docRef = doc(db, "appointments", appt.id);
 
-      await updateDoc(docRef, {
-        status: newStatus,
-        updatedAt: serverTimestamp(),
-        // Add to audit trail for tracking
-        auditTrail: [
-          ...(appt.auditTrail || []),
-          {
-            action: newStatus,
-            by: user?.uid,
-            byName: user?.displayName || 'Referee',
-            timestamp: new Date().toISOString(),
-          }
-        ]
-      });
+    await updateDoc(docRef, {
+  status: newStatus,
+  updatedAt: serverTimestamp(),
+  refereeId: user?.uid,          // ← backfills correct UID
+  refereeEmail: user?.email,     // ← backfills correct email
+  auditTrail: [
+    ...(appt.auditTrail || []),
+    {
+      action: newStatus,
+      by: user?.uid,
+      byName: user?.displayName || 'Referee',
+      timestamp: new Date().toISOString(),
+    }
+  ]
+});
 
       // Custom Toast for Acceptance
       if (newStatus === 'accepted') {
