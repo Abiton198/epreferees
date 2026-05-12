@@ -6,6 +6,7 @@ import { Shield, ClipboardList, Users, BarChart3, LogIn } from 'lucide-react';
 const HERO_BG = 'https://d64gsuwffb70l.cloudfront.net/69f60c7f1f6e36b4505475f9_1777732877517_d02de9d7.png';
 const EPRU_LOGO = 'https://d64gsuwffb70l.cloudfront.net/6864f2d65357bdbaf4000c36_1777732607060_9ef1fbe3.png';
 const SARU_LOGO = 'https://d64gsuwffb70l.cloudfront.net/6864f2d65357bdbaf4000c36_1777732719818_ecffd846.jpeg';
+const EP_BADGE = './eplogo.jpeg';
 
 const Hero: React.FC = () => {
   const [loginOpen, setLoginOpen] = useState(false);
@@ -20,10 +21,23 @@ const Hero: React.FC = () => {
       <div className="absolute inset-0 bg-gradient-to-br from-[#0a1f15]/95 via-[#003d28]/80 to-[#0a1f15]/95" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/40" />
 
+      <div className="absolute inset-0 bg-gradient-to-br from-[#0a1f15]/95 via-[#003d28]/80 to-[#0a1f15]/95" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/40" />
+
+
+      {/* Mobile watermark logo */}
+      <div className="absolute inset-0 flex items-center justify-center lg:hidden pointer-events-none overflow-hidden">
+        <img
+          src={EP_BADGE}
+          alt="EPRU Watermark"
+          className="w-[85vw] max-w-[420px] object-contain opacity-[0.05] blur-[1.5px] rotate-[-12deg] animate-pulse"
+        />
+      </div>
+
       {/* Top nav */}
       <header className="relative z-10 flex items-center justify-between px-6 md:px-12 py-5">
         <div className="flex items-center gap-3">
-          <img src={EPRU_LOGO} alt="EPRU" className="h-12 w-12 rounded-full bg-white/95 p-1 shadow-lg" />
+          <img src={EP_BADGE} alt="EPRU" className="h-12 w-12 rounded-full bg-white/95 p-1 shadow-lg" />
           <div className="hidden sm:block">
             <div className="text-white font-bold text-lg leading-none">EPRRS</div>
             <div className="text-[#FFB81C] text-xs">Referee Management</div>
@@ -102,7 +116,7 @@ const Hero: React.FC = () => {
               <div className="absolute -inset-10 bg-gradient-to-br from-[#FFB81C]/20 via-[#006747]/20 to-transparent rounded-full blur-3xl" />
               <div className="relative grid grid-cols-2 gap-6">
                 <div className="bg-white/95 backdrop-blur-sm rounded-3xl p-8 shadow-2xl border border-white/20 transform hover:scale-105 transition">
-                  <img src={EPRU_LOGO} alt="EPRU" className="w-44 h-44 object-contain mx-auto" />
+                  <img src={EP_BADGE} alt="EPRU" className="w-44 h-44 object-contain mx-auto" />
                   <div className="text-center mt-4 text-sm font-bold text-[#1a1a1a]">Eastern Province Rugby Union</div>
                 </div>
                 <div className="bg-gradient-to-br from-[#006747] to-[#004d35] rounded-3xl p-8 shadow-2xl border border-white/20 transform hover:scale-105 transition mt-12">
