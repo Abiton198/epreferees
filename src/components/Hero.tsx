@@ -25,14 +25,6 @@ const Hero: React.FC = () => {
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/40" />
 
 
-      {/* Mobile watermark logo */}
-      <div className="absolute inset-0 flex items-center justify-center lg:hidden pointer-events-none overflow-hidden">
-        <img
-          src={EP_BADGE}
-          alt="EPRU Watermark"
-          className="w-[85vw] max-w-[420px] object-contain opacity-[0.05] blur-[1.5px] rotate-[-12deg] animate-pulse"
-        />
-      </div>
 
       {/* Top nav */}
       <header className="relative z-10 flex items-center justify-between px-6 md:px-12 py-5">
@@ -74,6 +66,16 @@ const Hero: React.FC = () => {
               Eastern Province Rugby Union. Built with full audit trail compliance and
               real-time appointment tracking.
             </p>
+
+            {/* Mobile watermark logo */}
+            <div className="absolute inset-0 flex items-center justify-center lg:hidden pointer-events-none overflow-hidden">
+              <img
+                src={EP_BADGE}
+                alt="EPRU Watermark"
+                className="w-[85vw] max-w-[420px] object-contain opacity-[0.05] blur-[1.5px] rotate-[-12deg] animate-pulse"
+              />
+            </div>
+
             <div className="mt-8 flex flex-wrap gap-4">
               <Button
                 onClick={() => setLoginOpen(true)}
