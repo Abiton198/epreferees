@@ -385,7 +385,7 @@ const CoachDashboard: React.FC = () => {
                               {(a as any).refereeName || referees[a.refereeId]?.full_name || 'Assigned Official'}
                             </span>
                             <span className="text-[10px] text-gray-400 uppercase tracking-tighter">
-                              Certified Official
+                              {a.officialRole || 'Referee'}
                             </span>
                           </div>
                         ) : (
