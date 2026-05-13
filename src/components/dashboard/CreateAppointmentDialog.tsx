@@ -73,6 +73,11 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
 
   const isClub = formData.competitionType === 'club';
 
+  const [teamASearch, setTeamASearch] = useState("");
+  const [teamBSearch, setTeamBSearch] = useState("");
+  const [refereeSearch, setRefereeSearch] = useState("");
+
+
   // ─── Initialization ────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -208,6 +213,21 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
     }
   };
 
+  // Team Search Logic
+  const filteredTeamA = teams.filter((t) =>
+    t.name.toLowerCase().includes(teamASearch.toLowerCase())
+  );
+
+  const filteredTeamB = teams.filter((t) =>
+    t.name.toLowerCase().includes(teamBSearch.toLowerCase())
+  );
+
+
+
+  const filteredReferees = referees.filter((r) =>
+    resolveName(r).toLowerCase().includes(refereeSearch.toLowerCase())
+  );
+
   // ─── Render Helpers ─────────────────────────────────────────────────────────
 
   const updateField = (field: string, value: any) => {
@@ -260,40 +280,105 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
           {step === 2 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
+
+                {/* HOME TEAM */}
+                <div className="space-y-2 relative">
                   <Label>Home Team (A)</Label>
+
                   {isClub ? (
-                    <select
-                      className="w-full p-2 border rounded-md"
-                      value={formData.teamAId}
-                      onChange={(e) => {
-                        const t = teams.find(x => x.id === e.target.value);
-                        updateField('teamAId', e.target.value);
-                        if (t?.homeGround) updateField('venue', t.homeGround);
-                      }}
-                    >
-                      <option value="">Select Club...</option>
-                      {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
+                    <>
+                      <Input
+                        placeholder="Search team..."
+                        value={teamASearch}
+                        onChange={(e) => setTeamASearch(e.target.value)}
+                      />
+
+                      <div className="border rounded-md max-h-48 overflow-y-auto bg-white shadow-sm">
+                        {filteredTeamA.length > 0 ? (
+                          filteredTeamA.map((t) => (
+                            <div
+                              key={t.id}
+                              className={`p-2 cursor-pointer hover:bg-gray-100 ${formData.teamAId === t.id
+                                ? "bg-blue-100 font-semibold"
+                                : ""
+                                }`}
+                              onClick={() => {
+                                updateField("teamAId", t.id);
+                                setTeamASearch(t.name);
+
+                                if (t?.homeGround) {
+                                  updateField("venue", t.homeGround);
+                                }
+                              }}
+                            >
+                              {t.name}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="p-2 text-gray-500 text-sm">
+                            No teams found
+                          </div>
+                        )}
+                      </div>
+                    </>
                   ) : (
-                    <Input value={formData.teamAManual} onChange={(e) => updateField('teamAManual', e.target.value)} placeholder="Enter school/team name" />
+                    <Input
+                      value={formData.teamAManual}
+                      onChange={(e) =>
+                        updateField("teamAManual", e.target.value)
+                      }
+                      placeholder="Enter school/team name"
+                    />
                   )}
                 </div>
-                <div className="space-y-2">
+
+                {/* AWAY TEAM */}
+                <div className="space-y-2 relative">
                   <Label>Away Team (B)</Label>
+
                   {isClub ? (
-                    <select
-                      className="w-full p-2 border rounded-md"
-                      value={formData.teamBId}
-                      onChange={(e) => updateField('teamBId', e.target.value)}
-                    >
-                      <option value="">Select Club...</option>
-                      {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
+                    <>
+                      <Input
+                        placeholder="Search team..."
+                        value={teamBSearch}
+                        onChange={(e) => setTeamBSearch(e.target.value)}
+                      />
+
+                      <div className="border rounded-md max-h-48 overflow-y-auto bg-white shadow-sm">
+                        {filteredTeamB.length > 0 ? (
+                          filteredTeamB.map((t) => (
+                            <div
+                              key={t.id}
+                              className={`p-2 cursor-pointer hover:bg-gray-100 ${formData.teamBId === t.id
+                                ? "bg-blue-100 font-semibold"
+                                : ""
+                                }`}
+                              onClick={() => {
+                                updateField("teamBId", t.id);
+                                setTeamBSearch(t.name);
+                              }}
+                            >
+                              {t.name}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="p-2 text-gray-500 text-sm">
+                            No teams found
+                          </div>
+                        )}
+                      </div>
+                    </>
                   ) : (
-                    <Input value={formData.teamBManual} onChange={(e) => updateField('teamBManual', e.target.value)} placeholder="Enter school/team name" />
+                    <Input
+                      value={formData.teamBManual}
+                      onChange={(e) =>
+                        updateField("teamBManual", e.target.value)
+                      }
+                      placeholder="Enter school/team name"
+                    />
                   )}
                 </div>
+
               </div>
             </div>
           )}
@@ -320,26 +405,46 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
 
           {/* STEP 4: Assignment */}
           {step === 4 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
-              <div className="space-y-2">
-                <Label>Assign Referee (Optional)</Label>
-                <select
-                  className="w-full p-2 border rounded-md"
-                  value={formData.refereeId}
-                  onChange={(e) => updateField('refereeId', e.target.value)}
+            <div className="space-y-2 relative">
+              <Label>Assign Referee (Optional)</Label>
+
+              <Input
+                placeholder="Search referee..."
+                value={refereeSearch}
+                onChange={(e) => setRefereeSearch(e.target.value)}
+              />
+
+              <div className="border rounded-md max-h-48 overflow-y-auto bg-white shadow-sm">
+                <div
+                  className={`p-2 cursor-pointer hover:bg-gray-100 ${formData.refereeId === "" ? "bg-blue-100 font-semibold" : ""
+                    }`}
+                  onClick={() => {
+                    updateField("refereeId", "");
+                    setRefereeSearch("");
+                  }}
                 >
-                  <option value="">Leave Unassigned</option>
-                  {referees.map(r => <option key={r.id} value={r.id}>{resolveName(r)}</option>)}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label>Additional Notes</Label>
-                <Textarea value={formData.notes} onChange={(e) => updateField('notes', e.target.value)} placeholder="Kit colors, parking info, etc." />
+                  Leave Unassigned
+                </div>
+
+                {filteredReferees.map((r) => (
+                  <div
+                    key={r.id}
+                    className={`p-2 cursor-pointer hover:bg-gray-100 ${formData.refereeId === r.id
+                      ? "bg-blue-100 font-semibold"
+                      : ""
+                      }`}
+                    onClick={() => {
+                      updateField("refereeId", r.id);
+                      setRefereeSearch(resolveName(r));
+                    }}
+                  >
+                    {resolveName(r)}
+                  </div>
+                ))}
               </div>
             </div>
           )}
         </div>
-
         {/* Footer Navigation */}
         <div className="flex items-center justify-between p-6 bg-slate-50 border-t">
           <Button
