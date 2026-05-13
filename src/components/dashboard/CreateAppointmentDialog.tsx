@@ -83,7 +83,7 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
     "Referee",
     "Assistant Referee",
     "1st Reserve",
-    "2nd Reserve",
+    "2nd Team",
     "4th Official",
     "5th Official",
   ];
