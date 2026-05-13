@@ -35,13 +35,8 @@ const Hero: React.FC = () => {
             <div className="text-[#FFB81C] text-xs">Referee Management</div>
           </div>
         </div>
-        <Button
-          onClick={() => setLoginOpen(true)}
-          className="bg-[#FFB81C] hover:bg-[#e0a417] text-[#1a1a1a] font-semibold shadow-lg shadow-[#FFB81C]/30"
-        >
-          <LogIn className="w-4 h-4 mr-2" />
-          Login
-        </Button>
+
+        <img src={SARU_LOGO} alt="SA Rugby" className="h-12 w-12 rounded-full bg-white/95 p-1 shadow-lg" />
       </header>
 
       {/* Hero content */}
