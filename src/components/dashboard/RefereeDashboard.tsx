@@ -47,6 +47,7 @@ const RefereeDashboard: React.FC = () => {
   const { user } = useAuth();
   const role = "referee";
 
+
   // State
   const [appts, setAppts] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,17 +57,17 @@ const RefereeDashboard: React.FC = () => {
   // New Appointment Popup Logic
   const [newAppt, setNewAppt] = useState<Appointment | null>(null);
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
- 
 
-// Helper — merges two appointment arrays, deduplicates by id, sorts by createdAt
-const mergeAppointments = (a: Appointment[], b: Appointment[]): Appointment[] => {
-  const map = new Map<string, Appointment>();
-  [...a, ...b].forEach(appt => map.set(appt.id, appt));
-  return Array.from(map.values()).sort((x, y) => {
-    const ts = (a: Appointment) => a.createdAt?.seconds ?? 0;
-    return ts(y) - ts(x);
-  });
-};
+
+  // Helper — merges two appointment arrays, deduplicates by id, sorts by createdAt
+  const mergeAppointments = (a: Appointment[], b: Appointment[]): Appointment[] => {
+    const map = new Map<string, Appointment>();
+    [...a, ...b].forEach(appt => map.set(appt.id, appt));
+    return Array.from(map.values()).sort((x, y) => {
+      const ts = (a: Appointment) => a.createdAt?.seconds ?? 0;
+      return ts(y) - ts(x);
+    });
+  };
 
   /**
    * 1. SYNC USER PROFILE
@@ -107,121 +108,121 @@ const mergeAppointments = (a: Appointment[], b: Appointment[]): Appointment[] =>
    * 2. REAL-TIME DATA LISTENER
    */
   useEffect(() => {
-  if (!user?.uid) return;
+    if (!user?.uid) return;
 
-  const unsubs: (() => void)[] = [];
-  let listById: Appointment[] = [];
-  let listByName: Appointment[] = [];
-  let listByEmail: Appointment[] = [];
+    const unsubs: (() => void)[] = [];
+    let listById: Appointment[] = [];
+    let listByName: Appointment[] = [];
+    let listByEmail: Appointment[] = [];
 
- const handleMerge = () => {
-  const merged = mergeAppointments(
-    mergeAppointments(listById, listByName),
-    listByEmail
-  );
-
-  setAppts(merged);
-
-  merged.forEach(a => {
-    if (!seenIds.has(a.id) && a.status === 'pending') {
-      setNewAppt(a);
-      setSeenIds(prev => new Set(prev).add(a.id));
-    }
-  });
-};
-
-  const init = async () => {
-    setLoading(true);
-    await syncProfile();
-
-    try {
-      // ── Query 1: by refereeId (UID) — primary ──────────────────────────
-      // Requires index: refereeId ASC + createdAt DESC
-      const q1 = query(
-        collection(db, "appointments"),
-        where("refereeId", "==", user.uid),
-        orderBy("createdAt", "desc")
+    const handleMerge = () => {
+      const merged = mergeAppointments(
+        mergeAppointments(listById, listByName),
+        listByEmail
       );
 
-      // ── Query 2: by refereeName — fallback (survives UID changes) ──────
-      // Requires index: refereeName ASC + createdAt DESC
-      const q2 = query(
-        collection(db, "appointments"),
-        where("refereeName", "==", user.displayName ?? ""),
-        orderBy("createdAt", "desc")
-      );
+      setAppts(merged);
 
-      const q3 = query(
-  collection(db, "appointments"),
-  where("refereeEmail", "==", user.email ?? ""),
-  orderBy("createdAt", "desc")
-);
-
-      let q1Ready = false;
-      let q2Ready = false;
-      let q3Ready = false;
-
-      const unsub1 = onSnapshot(q1,
-        (snap) => {
-          listById = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
-          q1Ready = true;
-          if (q1Ready && q2Ready && q3Ready) { setLoading(false); }
-          handleMerge();
-        },
-        (error) => {
-          console.error("❌ Query-by-ID error:", error.code, error.message);
-          q1Ready = true;
-          if (q1Ready && q2Ready) setLoading(false);
-          toast({ title: "Error (ID query)", description: error.message, variant: "destructive" });
+      merged.forEach(a => {
+        if (!seenIds.has(a.id) && a.status === 'pending') {
+          setNewAppt(a);
+          setSeenIds(prev => new Set(prev).add(a.id));
         }
-      );
+      });
+    };
 
-      const unsub2 = onSnapshot(q2,
-        (snap) => {
-          listByName = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
-          q2Ready = true;
-          if (q1Ready && q2Ready) { setLoading(false); }
-          handleMerge();
-        },
-        (error) => {
-          console.error("❌ Query-by-name error:", error.code, error.message);
-          q2Ready = true;
-          if (q1Ready && q2Ready) setLoading(false);
-          // Name query failing is non-fatal — silently continue
-        }
-      );
+    const init = async () => {
+      setLoading(true);
+      await syncProfile();
 
-      const unsub3 = onSnapshot(q3,
-        (snap) => {
-          listByEmail = snap.docs.map(d => ({
-            id: d.id,
-            ...d.data()
-          })) as Appointment[];
+      try {
+        // ── Query 1: by refereeId (UID) — primary ──────────────────────────
+        // Requires index: refereeId ASC + createdAt DESC
+        const q1 = query(
+          collection(db, "appointments"),
+          where("refereeId", "==", user.uid),
+          orderBy("createdAt", "desc")
+        );
 
-             q3Ready = true;
+        // ── Query 2: by refereeName — fallback (survives UID changes) ──────
+        // Requires index: refereeName ASC + createdAt DESC
+        const q2 = query(
+          collection(db, "appointments"),
+          where("refereeName", "==", user.displayName ?? ""),
+          orderBy("createdAt", "desc")
+        );
 
-          handleMerge();
-        },
-        (error) => {
-          console.error("❌ Query-by-email error:", error);
-        }
-);
+        const q3 = query(
+          collection(db, "appointments"),
+          where("refereeEmail", "==", user.email ?? ""),
+          orderBy("createdAt", "desc")
+        );
 
-      unsubs.push(unsub1, unsub2, unsub3);
-    } catch (err: any) {
-      console.error("❌ Init error:", err);
-      setLoading(false);
-    }
-  };
+        let q1Ready = false;
+        let q2Ready = false;
+        let q3Ready = false;
 
-  init();
-  return () => unsubs.forEach(fn => fn());
-}, [user?.uid]);
+        const unsub1 = onSnapshot(q1,
+          (snap) => {
+            listById = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
+            q1Ready = true;
+            if (q1Ready && q2Ready && q3Ready) { setLoading(false); }
+            handleMerge();
+          },
+          (error) => {
+            console.error("❌ Query-by-ID error:", error.code, error.message);
+            q1Ready = true;
+            if (q1Ready && q2Ready) setLoading(false);
+            toast({ title: "Error (ID query)", description: error.message, variant: "destructive" });
+          }
+        );
 
-console.log("CURRENT USER");
-console.log(user?.uid);
-console.log(user?.email);
-console.log(user?.displayName);
+        const unsub2 = onSnapshot(q2,
+          (snap) => {
+            listByName = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
+            q2Ready = true;
+            if (q1Ready && q2Ready) { setLoading(false); }
+            handleMerge();
+          },
+          (error) => {
+            console.error("❌ Query-by-name error:", error.code, error.message);
+            q2Ready = true;
+            if (q1Ready && q2Ready) setLoading(false);
+            // Name query failing is non-fatal — silently continue
+          }
+        );
+
+        const unsub3 = onSnapshot(q3,
+          (snap) => {
+            listByEmail = snap.docs.map(d => ({
+              id: d.id,
+              ...d.data()
+            })) as Appointment[];
+
+            q3Ready = true;
+
+            handleMerge();
+          },
+          (error) => {
+            console.error("❌ Query-by-email error:", error);
+          }
+        );
+
+        unsubs.push(unsub1, unsub2, unsub3);
+      } catch (err: any) {
+        console.error("❌ Init error:", err);
+        setLoading(false);
+      }
+    };
+
+    init();
+    return () => unsubs.forEach(fn => fn());
+  }, [user?.uid]);
+
+  console.log("CURRENT USER");
+  console.log(user?.uid);
+  console.log(user?.email);
+  console.log(user?.displayName);
 
   /**
    * 3. ACTIONS
@@ -231,21 +232,21 @@ console.log(user?.displayName);
     try {
       const docRef = doc(db, "appointments", appt.id);
 
-    await updateDoc(docRef, {
-  status: newStatus,
-  updatedAt: serverTimestamp(),
-  refereeId: user?.uid,          // ← backfills correct UID
-  refereeEmail: user?.email,     // ← backfills correct email
-  auditTrail: [
-    ...(appt.auditTrail || []),
-    {
-      action: newStatus,
-      by: user?.uid,
-      byName: user?.displayName || 'Referee',
-      timestamp: new Date().toISOString(),
-    }
-  ]
-});
+      await updateDoc(docRef, {
+        status: newStatus,
+        updatedAt: serverTimestamp(),
+        refereeId: user?.uid,          // ← backfills correct UID
+        refereeEmail: user?.email,     // ← backfills correct email
+        auditTrail: [
+          ...(appt.auditTrail || []),
+          {
+            action: newStatus,
+            by: user?.uid,
+            byName: user?.displayName || 'Referee',
+            timestamp: new Date().toISOString(),
+          }
+        ]
+      });
 
       // Custom Toast for Acceptance
       if (newStatus === 'accepted') {
@@ -377,6 +378,10 @@ console.log(user?.displayName);
                             {appt.homeTeam} vs {appt.awayTeam}
                           </span>
                           <StatusBadge status={appt.status} />
+
+                          <div className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide">
+                            {appt.officialRole || "Referee"}
+                          </div>
                         </div>
                         <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 mt-2">
                           <div className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {appt.matchDate} @ {appt.matchTime}</div>
@@ -433,6 +438,12 @@ console.log(user?.displayName);
                 <div className="text-center mb-4">
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Matchup</p>
                   <h4 className="text-xl font-black text-slate-900">{newAppt.homeTeam} vs {newAppt.awayTeam}</h4>
+                </div>
+
+                {/* OFFICIAL ROLE */}
+                <div className="flex items-center gap-1.5 font-medium text-indigo-700 uppercase text-xs tracking-tight bg-indigo-50 px-2 py-1 rounded-full border border-indigo-100">
+                  <UserCheck className="w-3.5 h-3.5" />
+                  {newAppt.officialRole || "Referee"}
                 </div>
 
                 <div className="space-y-3 text-sm text-slate-600">

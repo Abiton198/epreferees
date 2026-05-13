@@ -18,6 +18,7 @@ export interface Appointment {
   coachId: string;
   refereeId: string | null;
   refereeName?: string;
+  officialRole?: string;
   coachName?: string;
   homeTeam?: string;
   awayTeam?: string;

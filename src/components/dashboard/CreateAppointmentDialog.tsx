@@ -68,6 +68,7 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
     venue: '',
     refereeId: '',
     refereeRole: 'referee' as 'referee' | 'assistant',
+    officialRole: "Referee",
     notes: ''
   });
 
@@ -76,6 +77,16 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
   const [teamASearch, setTeamASearch] = useState("");
   const [teamBSearch, setTeamBSearch] = useState("");
   const [refereeSearch, setRefereeSearch] = useState("");
+  const [selectedRole, setSelectedRole] = useState("referee");
+
+  const officialRoles = [
+    "Referee",
+    "Assistant Referee",
+    "1st Reserve",
+    "2nd Reserve",
+    "4th Official",
+    "5th Official",
+  ];
 
 
   // ─── Initialization ────────────────────────────────────────────────────────
@@ -141,6 +152,7 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
             venue: editData.venue || '',
             refereeId: editData.refereeId || '',
             refereeRole: editData.refereeRole || 'referee',
+            officialRole: editData.officialRole || "Referee",
             notes: editData.notes || ''
           });
         }
@@ -405,46 +417,82 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
 
           {/* STEP 4: Assignment */}
           {step === 4 && (
-            <div className="space-y-2 relative">
-              <Label>Assign Referee (Optional)</Label>
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
 
-              <Input
-                placeholder="Search referee..."
-                value={refereeSearch}
-                onChange={(e) => setRefereeSearch(e.target.value)}
-              />
+              {/* ROLE */}
+              <div className="space-y-2">
+                <Label>Official Role</Label>
 
-              <div className="border rounded-md max-h-48 overflow-y-auto bg-white shadow-sm">
-                <div
-                  className={`p-2 cursor-pointer hover:bg-gray-100 ${formData.refereeId === "" ? "bg-blue-100 font-semibold" : ""
-                    }`}
-                  onClick={() => {
-                    updateField("refereeId", "");
-                    setRefereeSearch("");
-                  }}
+                <select
+                  className="w-full p-2 border rounded-md"
+                  value={selectedRole}
+                  onChange={(e) => setSelectedRole(e.target.value)}
                 >
-                  Leave Unassigned
-                </div>
+                  {officialRoles.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                {filteredReferees.map((r) => (
+              {/* REFEREE SEARCH */}
+              <div className="space-y-2 relative">
+                <Label>Assign {selectedRole}</Label>
+
+                <Input
+                  placeholder={`Search ${selectedRole.toLowerCase()}...`}
+                  value={refereeSearch}
+                  onChange={(e) => setRefereeSearch(e.target.value)}
+                />
+
+                <div className="border rounded-md max-h-48 overflow-y-auto bg-white shadow-sm">
+
                   <div
-                    key={r.id}
-                    className={`p-2 cursor-pointer hover:bg-gray-100 ${formData.refereeId === r.id
+                    className={`p-2 cursor-pointer hover:bg-gray-100 ${formData.refereeId === ""
                       ? "bg-blue-100 font-semibold"
                       : ""
                       }`}
                     onClick={() => {
-                      updateField("refereeId", r.id);
-                      setRefereeSearch(resolveName(r));
+                      updateField("refereeId", "");
+                      setRefereeSearch("");
                     }}
                   >
-                    {resolveName(r)}
+                    Leave Unassigned
                   </div>
-                ))}
+
+                  {filteredReferees.map((r) => (
+                    <div
+                      key={r.id}
+                      className={`p-2 cursor-pointer hover:bg-gray-100 ${formData.refereeId === r.id
+                        ? "bg-blue-100 font-semibold"
+                        : ""
+                        }`}
+                      onClick={() => {
+                        updateField("refereeId", r.id);
+                        updateField("officialRole", selectedRole);
+                        setRefereeSearch(resolveName(r));
+                      }}
+                    >
+                      {resolveName(r)}
+                    </div>
+                  ))}
+                </div>
               </div>
+
+              {/* NOTES */}
+              <div className="space-y-2">
+                <Label>Additional Notes</Label>
+
+                <Textarea
+                  value={formData.notes}
+                  onChange={(e) => updateField("notes", e.target.value)}
+                  placeholder="Kit colors, parking info, etc."
+                />
+              </div>
+
             </div>
-          )}
-        </div>
+          )}        </div>
         {/* Footer Navigation */}
         <div className="flex items-center justify-between p-6 bg-slate-50 border-t">
           <Button
