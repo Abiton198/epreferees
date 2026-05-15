@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  collection, query, where, onSnapshot,
-  orderBy, deleteDoc, updateDoc, doc, serverTimestamp
+  collection,
+  query,
+  where,
+  onSnapshot,
+  orderBy,
+  updateDoc,
+  doc,
+  serverTimestamp
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import DashboardHeader from './DashboardHeader';
@@ -22,6 +28,7 @@ import {
   Loader2, Pencil, Trash2
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
+
 
 const CoachDashboard: React.FC = () => {
   const { user } = useAuth() as any;
@@ -109,8 +116,9 @@ const CoachDashboard: React.FC = () => {
 
 
   // ── Computed values ───────────────────────────────────────────────────────
+  const visibleAppointments = appts;
 
-  const filtered = useMemo(() => appts.filter((a) => {
+  const filtered = useMemo(() => visibleAppointments.filter((a) => {
     const matchesStatus = statusFilter === 'all' || a.status === statusFilter;
     const q = search.toLowerCase();
     const matchesSearch = !search ||
@@ -121,41 +129,88 @@ const CoachDashboard: React.FC = () => {
   }), [appts, search, statusFilter]);
 
   const stats = useMemo(() => ({
-    total: appts.length,
-    pending: appts.filter(a => a.status === 'pending').length,
-    accepted: appts.filter(a => a.status === 'accepted').length,
-    rejected: appts.filter(a => a.status === 'rejected').length,
+    total: appts.filter(a => !a.deleted).length,
+
+    pending: appts.filter(
+      a => a.status === 'pending' && !a.deleted
+    ).length,
+
+    accepted: appts.filter(
+      a => a.status === 'accepted' && !a.deleted
+    ).length,
+
+    rejected: appts.filter(
+      a => a.status === 'rejected' && !a.deleted
+    ).length,
+
+    cancelled: appts.filter(
+      (a: any) => a.deleted
+    ).length,
+
   }), [appts]);
 
   const venues = useMemo(() =>
     [...new Set(teams.map(t => t.homeGround))].filter(Boolean), [teams]);
 
-  // ── Delete ────────────────────────────────────────────────────────────────
 
-  const confirmDelete = async () => {
+  // ── Delete ────────────────────────────────────────────────────────────────
+  const handleDeleteClick = (a: Appointment) => {
+    setDeleteId(a.id);
+  };
+
+  // CONFIRM DELETE FUNCTION
+
+  const handleConfirmDelete = async () => {
     if (!deleteId) return;
+
     setDeleteLoading(true);
+
     try {
-      await deleteDoc(doc(db, "appointments", deleteId));
-      toast({ title: "Appointment deleted" });
+      const appointment = appts.find(a => a.id === deleteId);
+
+      if (!appointment) {
+        throw new Error("Appointment not found");
+      }
+
+      await updateDoc(doc(db, "appointments", deleteId), {
+        deleted: true,
+        deletedAt: serverTimestamp(),
+        deletedBy: user?.uid || "coach",
+        previousStatus: appointment.status,
+
+        auditTrail: [
+          ...(appointment.auditTrail || []),
+          {
+            action: "deleted",
+            by: user?.uid || "unknown",
+            byName: user?.displayName || user?.email || "Coach",
+            byRole: "coach",
+            timestamp: new Date().toISOString(),
+            details: {
+              previousStatus: appointment.status
+            }
+          }
+        ]
+      });
+
+      toast({
+        title: "Appointment removed",
+        description: "The appointment was archived successfully.",
+      });
+
       setDeleteId(null);
-    } catch (err: any) {
-      toast({ title: "Delete failed", description: err.message, variant: "destructive" });
+
+    } catch (error: any) {
+      console.error("Delete error:", error);
+
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
     } finally {
       setDeleteLoading(false);
     }
-  };
-
-  const handleDeleteClick = (a: Appointment) => {
-    if (a.status !== 'pending') {
-      toast({
-        title: "Cannot delete",
-        description: "Only pending appointments can be deleted.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setDeleteId(a.id);
   };
 
   // ── Edit ──────────────────────────────────────────────────────────────────
@@ -281,20 +336,67 @@ const CoachDashboard: React.FC = () => {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
           {[
-            { label: 'Total', value: stats.total, icon: Calendar, color: 'text-gray-700', bg: 'bg-gray-100' },
-            { label: 'Pending', value: stats.pending, icon: Clock, color: 'text-amber-700', bg: 'bg-amber-100' },
-            { label: 'Accepted', value: stats.accepted, icon: CheckCircle2, color: 'text-emerald-700', bg: 'bg-emerald-100' },
-            { label: 'Rejected', value: stats.rejected, icon: XCircle, color: 'text-rose-700', bg: 'bg-rose-100' },
+            {
+              label: 'Total',
+              value: stats.total,
+              icon: Calendar,
+              color: 'text-gray-700',
+              bg: 'bg-gray-100'
+            },
+
+            {
+              label: 'Pending',
+              value: stats.pending,
+              icon: Clock,
+              color: 'text-amber-700',
+              bg: 'bg-amber-100'
+            },
+
+            {
+              label: 'Accepted',
+              value: stats.accepted,
+              icon: CheckCircle2,
+              color: 'text-emerald-700',
+              bg: 'bg-emerald-100'
+            },
+
+            {
+              label: 'Rejected',
+              value: stats.rejected,
+              icon: XCircle,
+              color: 'text-rose-700',
+              bg: 'bg-rose-100'
+            },
+
+            {
+              label: 'Cancelled',
+              value: stats.cancelled,
+              icon: Trash2,
+              color: 'text-red-700',
+              bg: 'bg-red-100'
+            },
+
           ].map((s, i) => (
-            <div key={i} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm transition-transform hover:-translate-y-0.5">
+            <div
+              key={i}
+              className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm transition-transform hover:-translate-y-0.5"
+            >
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-xs uppercase tracking-wider text-gray-500 font-bold">{s.label}</div>
-                  <div className="text-3xl font-black text-gray-900 mt-1">{s.value}</div>
+                  <div className="text-xs uppercase tracking-wider text-gray-500 font-bold">
+                    {s.label}
+                  </div>
+
+                  <div className="text-3xl font-black text-gray-900 mt-1">
+                    {s.value}
+                  </div>
                 </div>
-                <div className={`w-12 h-12 rounded-xl ${s.bg} flex items-center justify-center`}>
+
+                <div
+                  className={`w-12 h-12 rounded-xl ${s.bg} flex items-center justify-center`}
+                >
                   <s.icon className={`w-6 h-6 ${s.color}`} />
                 </div>
               </div>
@@ -356,85 +458,159 @@ const CoachDashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filtered.map((a) => (
-                    <tr key={a.id} className="group hover:bg-emerald-50/30 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="font-bold text-gray-900">
-                          {a.homeTeam}
-                          <span className="text-gray-400 font-normal mx-1 text-xs">vs</span>
-                          {a.awayTeam}
-                        </div>
-                        <div className="text-[10px] font-bold text-emerald-700 flex items-center gap-1 mt-1 uppercase tracking-tighter bg-emerald-50 w-fit px-1.5 rounded">
-                          <Trophy className="w-3 h-3" /> {(a as any).competition || 'League Match'}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2 text-sm text-gray-600 font-medium">
-                          <MapPin className="w-4 h-4 text-gray-300" /> {a.venue}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-700">
-                        <div className="font-medium">{a.matchDate}</div>
-                        <div className="text-xs text-gray-400">{a.matchTime}</div>
-                      </td>
-                      <td className="px-6 py-4 text-sm">
-                        {a.refereeId ? (
-                          <div className="flex flex-col">
-                            <span className="font-semibold text-gray-800">
-                              {/* 1. Try name on the appointment, 2. Try map by ID, 3. Fallback to 'Assigned' */}
-                              {(a as any).refereeName || referees[a.refereeId]?.full_name || 'Assigned Official'}
+                  {filtered.map((a) => {
+                    const isDeleted = (a as any).deleted;
+
+                    return (
+                      <tr
+                        key={a.id}
+                        className={`
+          group transition-colors
+          ${isDeleted
+                            ? 'bg-red-50/30 opacity-45'
+                            : 'hover:bg-emerald-50/30'}
+        `}
+                      >
+                        {/* Fixture */}
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-gray-900 flex items-center gap-2">
+                            <span className={isDeleted ? 'line-through' : ''}>
+                              {a.homeTeam}
+                              <span className="text-gray-400 font-normal mx-1 text-xs">vs</span>
+                              {a.awayTeam}
                             </span>
-                            <span className="text-[10px] text-gray-400 uppercase tracking-tighter">
-                              {a.officialRole || 'Referee'}
+
+                            {isDeleted && (
+                              <span className="text-[10px] uppercase font-black tracking-wider px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
+                                Archived
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-[10px] font-bold text-emerald-700 flex items-center gap-1 mt-1 uppercase tracking-tighter bg-emerald-50 w-fit px-1.5 rounded">
+                            <Trophy className="w-3 h-3" />
+                            {(a as any).competition || 'League Match'}
+                          </div>
+                        </td>
+
+                        {/* Venue */}
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2 text-sm text-gray-600 font-medium">
+                            <MapPin className="w-4 h-4 text-gray-300" />
+                            <span className={isDeleted ? 'line-through' : ''}>
+                              {a.venue}
                             </span>
                           </div>
-                        ) : (
-                          <span className="text-gray-400 italic text-xs">Awaiting Assignee</span>
-                        )}
-                      </td>
+                        </td>
 
-                      <td className="px-6 py-4 text-center">
-                        <div className="flex flex-col items-center gap-1">
-                          <StatusBadge status={a.status as AppointmentStatus} />
-                          {a.status !== 'pending' && (
-                            <span className="text-[10px] text-gray-500 italic">
-                              {getStatusTimestamp(a)}
+                        {/* Date */}
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          <div className={`font-medium ${isDeleted ? 'line-through' : ''}`}>
+                            {a.matchDate}
+                          </div>
+
+                          <div className="text-xs text-gray-400">
+                            {a.matchTime}
+                          </div>
+
+                          {isDeleted && (
+                            <div className="text-[10px] text-red-500 italic mt-1">
+                              Archived for audit history
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Referee */}
+                        <td className="px-6 py-4 text-sm">
+                          {a.refereeId ? (
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-gray-800">
+                                {(a as any).refereeName ||
+                                  referees[a.refereeId]?.full_name ||
+                                  'Assigned Official'}
+                              </span>
+
+                              <span className="text-[10px] text-gray-400 uppercase tracking-tighter">
+                                {a.officialRole || 'Referee'}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400 italic text-xs">
+                              Awaiting Assignee
                             </span>
                           )}
-                        </div>
-                      </td>
+                        </td>
 
-                      <td className="px-6 py-4 text-right print:hidden">
-                        <div className="flex items-center justify-end gap-1">
-                          {/* Edit — only for pending */}
-                          <Button size="sm" variant="ghost"
-                            onClick={() => openEditModal(a)}
-                            className={`hover:bg-white border border-transparent hover:border-gray-200
-                              ${a.status !== 'pending' ? 'opacity-30 cursor-not-allowed' : ''}`}
-                            title={a.status !== 'pending' ? 'Only pending can be edited' : 'Edit'}>
-                            <Pencil className="w-4 h-4 text-gray-400 group-hover:text-blue-500" />
-                          </Button>
+                        {/* Status */}
+                        <td className="px-6 py-4 text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            {isDeleted ? (
+                              <span className="px-2 py-1 rounded-full text-[10px] uppercase font-bold tracking-wide bg-red-100 text-red-700 border border-red-200">
+                                Cancelled
+                              </span>
+                            ) : (
+                              <StatusBadge status={a.status as AppointmentStatus} />
+                            )}
 
-                          {/* Delete — only for pending */}
-                          <Button size="sm" variant="ghost"
-                            onClick={() => handleDeleteClick(a)}
-                            className={`hover:bg-white border border-transparent hover:border-red-200
-                              ${a.status !== 'pending' ? 'opacity-30 cursor-not-allowed' : ''}`}
-                            title={a.status !== 'pending' ? 'Only pending can be deleted' : 'Delete'}>
-                            <Trash2 className="w-4 h-4 text-gray-400 group-hover:text-red-500" />
-                          </Button>
+                            {a.status !== 'pending' && (
+                              <span className="text-[10px] text-gray-500 italic">
+                                {getStatusTimestamp(a)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
 
-                          {/* Audit trail */}
-                          <Button size="sm" variant="ghost"
-                            onClick={() => setAuditId(a.id)}
-                            className="hover:bg-white border border-transparent hover:border-gray-200"
-                            title="View audit trail">
-                            <ScrollText className="w-4 h-4 text-gray-400 group-hover:text-emerald-600" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        {/* Actions */}
+                        <td className="px-6 py-4 text-right print:hidden">
+                          <div className="flex items-center justify-end gap-1">
+
+                            {/* Hide edit/delete when archived */}
+                            {!isDeleted && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => openEditModal(a)}
+                                  className={`hover:bg-white border border-transparent hover:border-gray-200
+                    ${a.status !== 'pending'
+                                      ? 'opacity-30 cursor-not-allowed'
+                                      : ''}`}
+                                  title={
+                                    a.status !== 'pending'
+                                      ? 'Only pending can be edited'
+                                      : 'Edit'
+                                  }
+                                >
+                                  <Pencil className="w-4 h-4 text-gray-400 group-hover:text-blue-500" />
+                                </Button>
+
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleDeleteClick(a)}
+                                  className="hover:bg-white border border-transparent hover:border-red-200"
+                                  title="Archive appointment"
+                                >
+                                  <Trash2 className="w-4 h-4 text-gray-400 group-hover:text-red-500" />
+                                </Button>
+                              </>
+                            )}
+
+                            {/* Audit Trail always visible */}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setAuditId(a.id)}
+                              className="hover:bg-white border border-transparent hover:border-gray-200"
+                              title="View audit trail"
+                            >
+                              <ScrollText className="w-4 h-4 text-gray-400 group-hover:text-emerald-600" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -506,11 +682,11 @@ const CoachDashboard: React.FC = () => {
             <DialogTitle className="text-lg font-bold text-red-600">Delete Appointment?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-slate-600 py-2">
-            This action cannot be undone. The appointment will be permanently removed.
+            The appointment will be removed from the active list and archived in the audit history.
           </p>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
-            <Button onClick={confirmDelete} disabled={deleteLoading}
+            <Button onClick={handleConfirmDelete} disabled={deleteLoading}
               className="bg-red-600 hover:bg-red-700 text-white">
               {deleteLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Yes, Delete

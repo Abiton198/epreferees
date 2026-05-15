@@ -15,6 +15,8 @@ const actionLabels: Record<string, string> = {
   STATUS_REJECTED: 'Appointment Rejected',
   STATUS_COMPLETED: 'Marked Completed',
   UPDATE_FEEDBACK: 'Feedback Submitted',
+  deleted: 'Appointment Archived',
+  DELETE_APPOINTMENT: 'Appointment Archived',
 };
 
 const AuditTrailDrawer: React.FC<Props> = ({ appointmentId, onClose }) => {
@@ -47,29 +49,78 @@ const AuditTrailDrawer: React.FC<Props> = ({ appointmentId, onClose }) => {
             <div className="text-center py-12 text-gray-500 text-sm">No audit logs yet.</div>
           ) : (
             <ol className="relative border-l-2 border-[#006747]/20 ml-3 space-y-6">
-              {logs.map((log) => (
-                <li key={log.id} className="ml-6">
-                  <div className="absolute -left-[9px] w-4 h-4 rounded-full bg-[#006747] border-2 border-white shadow" />
-                  <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="font-semibold text-gray-900 text-sm">
-                        {actionLabels[log.action] || log.action}
+              {logs.map((log) => {
+                const isDeleted =
+                  log.action?.toLowerCase() === "deleted" ||
+                  log.action === "DELETE_APPOINTMENT";
+
+                return (
+                  <li
+                    key={log.id}
+                    className={`ml-6 transition-all ${isDeleted ? "opacity-50" : ""
+                      }`}
+                  >
+                    {/* Timeline Dot */}
+                    <div
+                      className={`absolute -left-[9px] w-4 h-4 rounded-full border-2 border-white shadow ${isDeleted
+                        ? "bg-red-400"
+                        : "bg-[#006747]"
+                        }`}
+                    />
+
+                    {/* Card */}
+                    <div
+                      className={`rounded-lg p-4 border shadow-sm transition-all ${isDeleted
+                        ? "bg-red-50 border-red-200 grayscale"
+                        : "bg-white border-gray-200"
+                        }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div
+                          className={`font-semibold text-sm ${isDeleted
+                            ? "text-red-700 line-through"
+                            : "text-gray-900"
+                            }`}
+                        >
+                          {isDeleted
+                            ? "Appointment Archived"
+                            : actionLabels[log.action] || log.action}
+                        </div>
+
+                        <span
+                          className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded ${isDeleted
+                            ? "bg-red-100 text-red-600"
+                            : "bg-gray-100 text-gray-600"
+                            }`}
+                        >
+                          {log.actor_role}
+                        </span>
                       </div>
-                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-gray-100 text-gray-600">
-                        {log.actor_role}
-                      </span>
+
+                      <div
+                        className={`text-xs mt-1 ${isDeleted
+                          ? "text-red-500"
+                          : "text-gray-500"
+                          }`}
+                      >
+                        {new Date(log.created_at).toLocaleString()}
+                      </div>
+
+                      {log.details &&
+                        Object.keys(log.details).length > 0 && (
+                          <pre
+                            className={`mt-2 rounded p-2 text-xs overflow-x-auto ${isDeleted
+                              ? "bg-red-100/60 text-red-700"
+                              : "bg-gray-50 text-gray-700"
+                              }`}
+                          >
+                            {JSON.stringify(log.details, null, 2)}
+                          </pre>
+                        )}
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {new Date(log.created_at).toLocaleString()}
-                    </div>
-                    {log.details && Object.keys(log.details).length > 0 && (
-                      <pre className="mt-2 bg-gray-50 rounded p-2 text-xs text-gray-700 overflow-x-auto">
-                        {JSON.stringify(log.details, null, 2)}
-                      </pre>
-                    )}
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ol>
           )}
         </div>

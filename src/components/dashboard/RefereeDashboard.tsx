@@ -58,6 +58,14 @@ const RefereeDashboard: React.FC = () => {
   const [newAppt, setNewAppt] = useState<Appointment | null>(null);
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
 
+  const activeAppointments = appts.filter(
+    (a: any) => !a.deleted
+  );
+
+  const cancelledAppointments = appts.filter(
+    (a: any) => a.deleted
+  );
+
 
   // Helper — merges two appointment arrays, deduplicates by id, sorts by createdAt
   const mergeAppointments = (a: Appointment[], b: Appointment[]): Appointment[] => {
@@ -281,10 +289,23 @@ const RefereeDashboard: React.FC = () => {
 
   // 4. MEMOIZED STATS
   const stats = useMemo(() => ({
-    pending: appts.filter(a => a.status === 'pending').length,
-    accepted: appts.filter(a => a.status === 'accepted').length,
-    total: appts.length,
-  }), [appts]);
+    pending: activeAppointments.filter(
+      a => a.status === 'pending'
+    ).length,
+
+    accepted: activeAppointments.filter(
+      a => a.status === 'accepted'
+    ).length,
+
+    rejected: activeAppointments.filter(
+      a => a.status === 'rejected'
+    ).length,
+
+    cancelled: cancelledAppointments.length,
+
+    total: activeAppointments.length,
+
+  }), [activeAppointments, cancelledAppointments]);
 
   if (loading) {
     return (
@@ -348,16 +369,48 @@ const RefereeDashboard: React.FC = () => {
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-              <StatCard label="Total Assignments" value={stats.total} icon={<Trophy className="w-5 h-5" />} color="blue" />
-              <StatCard label="Action Required" value={stats.pending} icon={<Clock className="w-5 h-5" />} color="amber" />
-              <StatCard label="Upcoming Confirmed" value={stats.accepted} icon={<Check className="w-5 h-5" />} color="emerald" />
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-10">
+              <StatCard
+                label="Total Assignments"
+                value={stats.total}
+                icon={<Trophy className="w-5 h-5" />}
+                color="blue"
+              />
+
+              <StatCard
+                label="Action Required"
+                value={stats.pending}
+                icon={<Clock className="w-5 h-5" />}
+                color="amber"
+              />
+
+              <StatCard
+                label="Upcoming Confirmed"
+                value={stats.accepted}
+                icon={<Check className="w-5 h-5" />}
+                color="emerald"
+              />
+
+              <StatCard
+                label="Rejected"
+                value={stats.rejected}
+                icon={<X className="w-5 h-5" />}
+                color="rose"
+              />
+
+              <StatCard
+                label="Cancelled"
+                value={stats.cancelled}
+                icon={<Calendar className="w-5 h-5" />}
+                color="red"
+              />            </div>
 
             {/* List Section */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-                <h2 className="font-bold text-slate-800 uppercase tracking-wider text-sm">Recent Appointments</h2>
+                <h2 className="font-bold text-slate-800 uppercase tracking-wider text-sm">
+                  Recent Appointments
+                </h2>
               </div>
 
               {appts.length === 0 ? (
@@ -365,56 +418,103 @@ const RefereeDashboard: React.FC = () => {
                   <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
                     <Calendar className="text-slate-300 w-10 h-10" />
                   </div>
-                  <h3 className="text-lg font-medium text-slate-900">No matches yet</h3>
-                  <p className="text-slate-500">When you are assigned to a match, it will appear here.</p>
+
+                  <h3 className="text-lg font-medium text-slate-900">
+                    No matches yet
+                  </h3>
+
+                  <p className="text-slate-500">
+                    When you are assigned to a match, it will appear here.
+                  </p>
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">
-                  {appts.map((appt) => (
-                    <div key={appt.id} className="p-6 hover:bg-slate-50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-3">
-                          <span className="font-bold text-lg text-slate-900">
-                            {appt.homeTeam} vs {appt.awayTeam}
-                          </span>
-                          <StatusBadge status={appt.status} />
+                  {[...activeAppointments, ...cancelledAppointments].map((appt: any) => {
+                    const isCancelled = appt.deleted;
 
-                          <div className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide">
-                            {appt.officialRole || "Referee"}
+                    return (
+                      <div
+                        key={appt.id}
+                        className={`p-6 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4
+              ${isCancelled
+                            ? "opacity-50 grayscale bg-red-50"
+                            : "hover:bg-slate-50"
+                          }`}
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <span
+                              className={`font-bold text-lg ${isCancelled
+                                  ? "text-slate-500 line-through"
+                                  : "text-slate-900"
+                                }`}
+                            >
+                              {appt.homeTeam} vs {appt.awayTeam}
+                            </span>
+
+                            {isCancelled ? (
+                              <div className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide bg-red-100 text-red-700 border border-red-200">
+                                Cancelled
+                              </div>
+                            ) : (
+                              <StatusBadge status={appt.status} />
+                            )}
+
+                            <div className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide">
+                              {appt.officialRole || "Referee"}
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 mt-2">
-                          <div className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {appt.matchDate} @ {appt.matchTime}</div>
-                          <div className="flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {appt.venue}</div>
-                          <div className="flex items-center gap-1.5 font-medium text-emerald-600 uppercase text-xs tracking-tight bg-emerald-50 px-2 rounded">
-                            {appt.competition}
+
+                          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 mt-2">
+                            <div className="flex items-center gap-1.5">
+                              <Calendar className="w-4 h-4" />
+                              {appt.matchDate} @ {appt.matchTime}
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              <MapPin className="w-4 h-4" />
+                              {appt.venue}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 font-medium text-emerald-600 uppercase text-xs tracking-tight bg-emerald-50 px-2 rounded">
+                              {appt.competition}
+                            </div>
                           </div>
+
+                          {isCancelled && (
+                            <div className="mt-3 text-sm text-red-600 italic font-medium">
+                              This appointment was cancelled by the coach and archived.
+                            </div>
+                          )}
                         </div>
+
+                        {appt.status === 'pending' && !isCancelled && (
+                          <div className="flex gap-2">
+                            <Button
+                              disabled={!!acting}
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleUpdateStatus(appt, 'rejected')}
+                              className="border-red-200 text-red-600 hover:bg-red-50"
+                            >
+                              <X className="w-4 h-4 mr-1" />
+                              Decline
+                            </Button>
+
+                            <Button
+                              disabled={!!acting}
+                              size="sm"
+                              onClick={() => handleUpdateStatus(appt, 'accepted')}
+                              className="bg-emerald-600 hover:bg-emerald-700"
+                            >
+                              <Check className="w-4 h-4 mr-1" />
+                              Accept
+                            </Button>
+                          </div>
+                        )}
                       </div>
-
-                      {appt.status === 'pending' && (
-                        <div className="flex gap-2">
-                          <Button
-                            disabled={!!acting}
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleUpdateStatus(appt, 'rejected')}
-                            className="border-red-200 text-red-600 hover:bg-red-50"
-                          >
-                            <X className="w-4 h-4 mr-1" /> Decline
-                          </Button>
-                          <Button
-                            disabled={!!acting}
-                            size="sm"
-                            onClick={() => handleUpdateStatus(appt, 'accepted')}
-                            className="bg-emerald-600 hover:bg-emerald-700"
-                          >
-                            <Check className="w-4 h-4 mr-1" /> Accept
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -490,11 +590,13 @@ const RefereeDashboard: React.FC = () => {
 /**
  * Helper Sub-component for Stats
  */
-const StatCard = ({ label, value, icon, color }: { label: string, value: number, icon: React.ReactNode, color: 'blue' | 'amber' | 'emerald' }) => {
+const StatCard = ({ label, value, icon, color }: { label: string, value: number, icon: React.ReactNode, color: 'blue' | 'amber' | 'emerald' | 'rose' | 'red' }) => {
   const colors = {
     blue: "border-l-blue-500 text-blue-600 bg-blue-50",
     amber: "border-l-amber-500 text-amber-600 bg-amber-50",
     emerald: "border-l-emerald-500 text-emerald-600 bg-emerald-50",
+    rose: "border-l-rose-500 text-rose-600 bg-rose-50",
+    red: "border-l-red-500 text-red-600 bg-red-50",
   };
 
   return (

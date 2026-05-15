@@ -34,6 +34,10 @@ export interface Appointment {
   updatedAt: string;
   coach?: Profile;
   referee?: Profile;
+  deleted?: boolean;
+  deletedAt?: any;
+  deletedBy?: string;
+  previousStatus?: string;
 }
 
 export interface AuditLog {
