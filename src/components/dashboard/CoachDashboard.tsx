@@ -570,7 +570,10 @@ const CoachDashboard: React.FC = () => {
                                 <Button
                                   size="sm"
                                   variant="ghost"
-                                  onClick={() => openEditModal(a)}
+                                  onClick={() => {
+                                    setEditAppt(a);
+                                    setCreateOpen(true);
+                                  }}
                                   className={`hover:bg-white border border-transparent hover:border-gray-200
                     ${a.status !== 'pending'
                                       ? 'opacity-30 cursor-not-allowed'
@@ -621,8 +624,18 @@ const CoachDashboard: React.FC = () => {
       {/* Create dialog */}
       <CreateAppointmentDialog
         open={createOpen}
-        onOpenChange={setCreateOpen}
-        onCreated={() => setCreateOpen(false)}
+        onOpenChange={(open) => {
+          setCreateOpen(open);
+
+          if (!open) {
+            setEditAppt(null);
+          }
+        }}
+        onCreated={() => {
+          setCreateOpen(false);
+          setEditAppt(null);
+        }}
+        editData={editAppt}
       />
 
       {/* Audit trail drawer */}

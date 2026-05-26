@@ -181,45 +181,181 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
 
   const handleSubmit = async () => {
     if (loading) return;
+
     setLoading(true);
 
     try {
       const selectedTeamA = teams.find(t => t.id === formData.teamAId);
       const selectedTeamB = teams.find(t => t.id === formData.teamBId);
-      const assignedRef = referees.find(r => r.id === formData.refereeId);
 
-      const homeName = isClub ? selectedTeamA?.name : formData.teamAManual;
-      const awayName = isClub ? selectedTeamB?.name : formData.teamBManual;
+      const assignedRef = referees.find(
+        r => r.id === formData.refereeId
+      );
 
-      const payload = {
-        ...formData,
+      const homeName = isClub
+        ? selectedTeamA?.name || ''
+        : formData.teamAManual;
+
+      const awayName = isClub
+        ? selectedTeamB?.name || ''
+        : formData.teamBManual;
+
+      const appointmentPayload = {
+        // Competition
+        competitionType: formData.competitionType,
         competition: formData.competitionName || formData.competitionType,
+        competitionName: formData.competitionName || '',
+
+        // Teams
+        homeTeamId: formData.teamAId || null,
+        awayTeamId: formData.teamBId || null,
+
         homeTeam: homeName,
         awayTeam: awayName,
+
         matchTitle: `${homeName} vs ${awayName}`,
-        refereeName: assignedRef ? resolveName(assignedRef) : null,
+
+        // Match details
+        matchDate: formData.matchDate,
+        matchTime: formData.matchTime,
+        venue: formData.venue,
+        notes: formData.notes || '',
+
+        // Assignment
+        refereeId: formData.refereeId || null,
+        refereeName: assignedRef
+          ? resolveName(assignedRef)
+          : null,
+
         refereeEmail: assignedRef?.email || null,
+
+        refereeRole: formData.refereeRole || 'referee',
+        officialRole: formData.officialRole || 'Referee',
+
+        // Metadata
+        teamLevel: formData.teamLevel || 'main',
+
         coachId: profile?.id || user?.uid,
-        coachName: profile?.firstName || profile?.displayName || 'Coach',
-        status: editData ? editData.status : 'pending',
+        coachName:
+          profile?.firstName ||
+          profile?.displayName ||
+          user?.displayName ||
+          'Coach',
+
         updatedAt: serverTimestamp(),
       };
 
+      // ─────────────────────────────────────────────
+      // EDIT MODE
+      // ─────────────────────────────────────────────
       if (editData?.id) {
-        await updateDoc(doc(db, 'appointments', editData.id), payload);
-        toast({ title: "Success", description: "Appointment updated successfully" });
-      } else {
-        await addDoc(collection(db, 'appointments'), {
-          ...payload,
-          createdAt: serverTimestamp()
+
+        const auditEntry = {
+          action: 'edited',
+          by: user?.uid || 'unknown',
+          byName:
+            user?.displayName ||
+            user?.email ||
+            'Coach',
+          byRole: 'coach',
+          timestamp: new Date().toISOString(),
+
+          details: {
+            oldHomeTeam: editData.homeTeam,
+            newHomeTeam: homeName,
+
+            oldAwayTeam: editData.awayTeam,
+            newAwayTeam: awayName,
+
+            oldVenue: editData.venue,
+            newVenue: formData.venue,
+
+            oldDate: editData.matchDate,
+            newDate: formData.matchDate,
+
+            oldTime: editData.matchTime,
+            newTime: formData.matchTime,
+
+            oldReferee:
+              editData.refereeName || 'Unassigned',
+
+            newReferee:
+              assignedRef
+                ? resolveName(assignedRef)
+                : 'Unassigned',
+
+            oldOfficialRole:
+              editData.officialRole || 'Referee',
+
+            newOfficialRole:
+              formData.officialRole,
+          }
+        };
+
+        await updateDoc(
+          doc(db, 'appointments', editData.id),
+          {
+            ...appointmentPayload,
+
+            auditTrail: [
+              ...(editData.auditTrail || []),
+              auditEntry
+            ]
+          }
+        );
+
+        toast({
+          title: "Appointment Updated",
+          description:
+            "All match details were updated successfully."
         });
-        toast({ title: "Success", description: "Appointment created successfully" });
+
+      } else {
+
+        // ─────────────────────────────────────────────
+        // CREATE MODE
+        // ─────────────────────────────────────────────
+        await addDoc(collection(db, 'appointments'), {
+          ...appointmentPayload,
+
+          status: 'pending',
+
+          createdAt: serverTimestamp(),
+
+          auditTrail: [
+            {
+              action: 'created',
+              by: user?.uid || 'unknown',
+              byName:
+                user?.displayName ||
+                user?.email ||
+                'Coach',
+              byRole: 'coach',
+              timestamp: new Date().toISOString(),
+            }
+          ]
+        });
+
+        toast({
+          title: "Appointment Created",
+          description:
+            "The match appointment has been created successfully."
+        });
       }
 
       onCreated();
       onOpenChange(false);
+
     } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+
+      console.error("Appointment save error:", err);
+
+      toast({
+        title: "Error",
+        description: err.message,
+        variant: "destructive"
+      });
+
     } finally {
       setLoading(false);
     }
