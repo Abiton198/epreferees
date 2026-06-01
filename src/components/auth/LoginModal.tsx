@@ -132,7 +132,24 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
     }
 
     // 2b. Role is set but profile is still incomplete — always go to setup
-    if (data.profileIncomplete || data.isNewUser) {
+    // Coaches do not require profile setup
+    if (data.role === 'coach') {
+      if (data.profileIncomplete || data.isNewUser) {
+        await updateDoc(userRef, {
+          profileIncomplete: false,
+          isNewUser: false,
+        });
+
+        goToDashboard('coach');
+        return;
+      }
+    }
+
+    // Referees require profile setup
+    if (
+      data.role === 'referee' &&
+      (data.profileIncomplete || data.isNewUser)
+    ) {
       openSetup(data);
       return;
     }
@@ -152,16 +169,30 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
 
     const userRef = doc(db, 'users', pendingUser.uid);
 
-    // Both roles require profile setup — mark incomplete until SetupProfileModal completes.
-    // If skipped, role defaults to 'referee' and setup is still required.
-    await updateDoc(userRef, {
-      role,
-      isNewUser: true,
-      profileIncomplete: true,
-    });
+    if (role === 'coach') {
+      // Coaches have no extra setup step — mark profile complete immediately
+      await updateDoc(userRef, {
+        role: 'coach',
+        isNewUser: false,
+        profileIncomplete: false,
+        setupCompleted: true,
+      });
 
-    // Always push into profile setup regardless of role
-    openSetup({ ...pendingUser, role });
+      setPendingUser({
+        ...pendingUser,
+        role: 'coach',
+      });
+
+      goToDashboard('coach');
+    } else {
+      // Referees (or skipped) still need profile setup
+      await updateDoc(userRef, {
+        role,
+        isNewUser: true,
+        profileIncomplete: true,
+      });
+      openSetup({ ...pendingUser, role });
+    }
   };
 
   // ── Setup completion callback ─────────────────────────────────────────────

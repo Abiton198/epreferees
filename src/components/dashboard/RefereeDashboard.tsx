@@ -301,11 +301,56 @@ const RefereeDashboard: React.FC = () => {
       a => a.status === 'rejected'
     ).length,
 
-    cancelled: cancelledAppointments.length,
-
     total: activeAppointments.length,
 
-  }), [activeAppointments, cancelledAppointments]);
+  }), [activeAppointments]);
+
+  const visibleAppointments = [...activeAppointments]
+    .filter((appt) => !appt.deleted);
+
+  const groupAppointmentsByDate = (appointments: any[]) => {
+    const groups: Record<string, any[]> = {
+      Today: [],
+      Yesterday: [],
+      "Last Week": [],
+      "Last Month": [],
+      Older: [],
+    };
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    appointments.forEach((appt) => {
+      const appointmentDate = new Date(appt.matchDate);
+
+      const diffDays = Math.floor(
+        (today.getTime() - appointmentDate.getTime()) /
+        (1000 * 60 * 60 * 24)
+      );
+
+      if (diffDays === 0) {
+        groups.Today.push(appt);
+      } else if (diffDays === 1) {
+        groups.Yesterday.push(appt);
+      } else if (diffDays <= 7) {
+        groups["Last Week"].push(appt);
+      } else if (diffDays <= 30) {
+        groups["Last Month"].push(appt);
+      } else {
+        groups.Older.push(appt);
+      }
+    });
+
+    return groups;
+  };
+
+  const groupedAppointments = groupAppointmentsByDate(
+    visibleAppointments.sort(
+      (a, b) =>
+        new Date(b.matchDate).getTime() -
+        new Date(a.matchDate).getTime()
+    )
+  );
 
   if (loading) {
     return (
@@ -429,92 +474,88 @@ const RefereeDashboard: React.FC = () => {
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">
-                  {[...activeAppointments, ...cancelledAppointments].map((appt: any) => {
-                    const isCancelled = appt.deleted;
+                  <div>
+                    {Object.entries(groupedAppointments).map(
+                      ([groupName, appointments]) =>
+                        appointments.length > 0 && (
+                          <div key={groupName}>
+                            <div className="sticky top-0 bg-slate-100 px-6 py-3 border-y border-slate-200">
+                              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                                {groupName}
+                              </h3>
+                            </div>
 
-                    return (
-                      <div
-                        key={appt.id}
-                        className={`p-6 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4
-              ${isCancelled
-                            ? "opacity-50 grayscale bg-red-50"
-                            : "hover:bg-slate-50"
-                          }`}
-                      >
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <span
-                              className={`font-bold text-lg ${isCancelled
-                                  ? "text-slate-500 line-through"
-                                  : "text-slate-900"
-                                }`}
-                            >
-                              {appt.homeTeam} vs {appt.awayTeam}
-                            </span>
+                            <div className="divide-y divide-slate-100">
+                              {appointments.map((appt: any) => (
+                                <div
+                                  key={appt.id}
+                                  className="p-6 hover:bg-slate-50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
+                                >
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                      <span className="font-bold text-lg text-slate-900">
+                                        {appt.homeTeam} vs {appt.awayTeam}
+                                      </span>
 
-                            {isCancelled ? (
-                              <div className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide bg-red-100 text-red-700 border border-red-200">
-                                Cancelled
-                              </div>
-                            ) : (
-                              <StatusBadge status={appt.status} />
-                            )}
+                                      <StatusBadge status={appt.status} />
 
-                            <div className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide">
-                              {appt.officialRole || "Referee"}
+                                      <div className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide">
+                                        {appt.officialRole || "Referee"}
+                                      </div>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 mt-2">
+                                      <div className="flex items-center gap-1.5">
+                                        <Calendar className="w-4 h-4" />
+                                        {appt.matchDate} @ {appt.matchTime}
+                                      </div>
+
+                                      <div className="flex items-center gap-1.5">
+                                        <MapPin className="w-4 h-4" />
+                                        {appt.venue}
+                                      </div>
+
+                                      <div className="flex items-center gap-1.5 font-medium text-emerald-600 uppercase text-xs tracking-tight bg-emerald-50 px-2 rounded">
+                                        {appt.competition}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {appt.status === "pending" && (
+                                    <div className="flex gap-2">
+                                      <Button
+                                        disabled={!!acting}
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() =>
+                                          handleUpdateStatus(appt, "rejected")
+                                        }
+                                        className="border-red-200 text-red-600 hover:bg-red-50"
+                                      >
+                                        <X className="w-4 h-4 mr-1" />
+                                        Decline
+                                      </Button>
+
+                                      <Button
+                                        disabled={!!acting}
+                                        size="sm"
+                                        onClick={() =>
+                                          handleUpdateStatus(appt, "accepted")
+                                        }
+                                        className="bg-emerald-600 hover:bg-emerald-700"
+                                      >
+                                        <Check className="w-4 h-4 mr-1" />
+                                        Accept
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
                             </div>
                           </div>
-
-                          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 mt-2">
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="w-4 h-4" />
-                              {appt.matchDate} @ {appt.matchTime}
-                            </div>
-
-                            <div className="flex items-center gap-1.5">
-                              <MapPin className="w-4 h-4" />
-                              {appt.venue}
-                            </div>
-
-                            <div className="flex items-center gap-1.5 font-medium text-emerald-600 uppercase text-xs tracking-tight bg-emerald-50 px-2 rounded">
-                              {appt.competition}
-                            </div>
-                          </div>
-
-                          {isCancelled && (
-                            <div className="mt-3 text-sm text-red-600 italic font-medium">
-                              This appointment was cancelled by the coach and archived.
-                            </div>
-                          )}
-                        </div>
-
-                        {appt.status === 'pending' && !isCancelled && (
-                          <div className="flex gap-2">
-                            <Button
-                              disabled={!!acting}
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUpdateStatus(appt, 'rejected')}
-                              className="border-red-200 text-red-600 hover:bg-red-50"
-                            >
-                              <X className="w-4 h-4 mr-1" />
-                              Decline
-                            </Button>
-
-                            <Button
-                              disabled={!!acting}
-                              size="sm"
-                              onClick={() => handleUpdateStatus(appt, 'accepted')}
-                              className="bg-emerald-600 hover:bg-emerald-700"
-                            >
-                              <Check className="w-4 h-4 mr-1" />
-                              Accept
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                        )
+                    )}
+                  </div>
                 </div>
               )}
             </div>

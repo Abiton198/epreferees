@@ -27,7 +27,20 @@ const AuditTrailDrawer: React.FC<Props> = ({ appointmentId, onClose }) => {
     if (!appointmentId) return;
     setLoading(true);
     fetchAuditTrail(appointmentId)
-      .then(setLogs)
+      .then((data) => {
+        console.log(
+          "Audit actions:",
+          data.map((x) => x.action)
+        );
+
+        const filteredLogs = data.filter(
+          (log) =>
+            log.action?.toLowerCase() !== "deleted" &&
+            log.action !== "DELETE_APPOINTMENT"
+        );
+
+        setLogs(filteredLogs);
+      })
       .finally(() => setLoading(false));
   }, [appointmentId]);
 
@@ -97,26 +110,6 @@ const AuditTrailDrawer: React.FC<Props> = ({ appointmentId, onClose }) => {
                         </span>
                       </div>
 
-                      <div
-                        className={`text-xs mt-1 ${isDeleted
-                          ? "text-red-500"
-                          : "text-gray-500"
-                          }`}
-                      >
-                        {new Date(log.created_at).toLocaleString()}
-                      </div>
-
-                      {log.details &&
-                        Object.keys(log.details).length > 0 && (
-                          <pre
-                            className={`mt-2 rounded p-2 text-xs overflow-x-auto ${isDeleted
-                              ? "bg-red-100/60 text-red-700"
-                              : "bg-gray-50 text-gray-700"
-                              }`}
-                          >
-                            {JSON.stringify(log.details, null, 2)}
-                          </pre>
-                        )}
                     </div>
                   </li>
                 );

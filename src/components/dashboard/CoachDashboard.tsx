@@ -28,6 +28,7 @@ import {
   Loader2, Pencil, Trash2
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
+import { TeamRegistrationForm } from './TeamRegistrationForm';
 
 
 const CoachDashboard: React.FC = () => {
@@ -56,6 +57,9 @@ const CoachDashboard: React.FC = () => {
   // Delete confirm state
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Team Registration
+  const [teamRegistrationOpen, setTeamRegistrationOpen] = useState(false);
 
   // ── Real-time listeners ──────────────────────────────────────────────────
   useEffect(() => {
@@ -116,7 +120,9 @@ const CoachDashboard: React.FC = () => {
 
 
   // ── Computed values ───────────────────────────────────────────────────────
-  const visibleAppointments = appts;
+  const visibleAppointments = appts.filter(
+    (a: any) => !a.deleted
+  );
 
   const filtered = useMemo(() => visibleAppointments.filter((a) => {
     const matchesStatus = statusFilter === 'all' || a.status === statusFilter;
@@ -707,6 +713,17 @@ const CoachDashboard: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Team Registration */}
+      <TeamRegistrationForm
+        open={teamRegistrationOpen}
+        onOpenChange={setTeamRegistrationOpen}
+        onCreated={() => {
+          setTeamRegistrationOpen(false);
+        }}
+
+      />
+
     </div>
   );
 };
