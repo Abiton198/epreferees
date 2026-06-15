@@ -308,8 +308,15 @@ const RefereeDashboard: React.FC = () => {
   const visibleAppointments = [...activeAppointments]
     .filter((appt) => !appt.deleted);
 
+
+  const parseLocalDate = (dateString: string) => {
+    const [y, m, d] = dateString.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  };
+
   const groupAppointmentsByDate = (appointments: any[]) => {
-    const groups: Record<string, any[]> = {
+    const groups = {
+      Upcoming: [],
       Today: [],
       Yesterday: [],
       "Last Week": [],
@@ -321,14 +328,16 @@ const RefereeDashboard: React.FC = () => {
     today.setHours(0, 0, 0, 0);
 
     appointments.forEach((appt) => {
-      const appointmentDate = new Date(appt.matchDate);
+      const date = parseLocalDate(appt.matchDate);
+      date.setHours(0, 0, 0, 0);
 
       const diffDays = Math.floor(
-        (today.getTime() - appointmentDate.getTime()) /
-        (1000 * 60 * 60 * 24)
+        (today.getTime() - date.getTime()) / 86400000
       );
 
-      if (diffDays === 0) {
+      if (diffDays < 0) {
+        groups.Upcoming.push(appt);
+      } else if (diffDays === 0) {
         groups.Today.push(appt);
       } else if (diffDays === 1) {
         groups.Yesterday.push(appt);
@@ -344,12 +353,22 @@ const RefereeDashboard: React.FC = () => {
     return groups;
   };
 
+  const groupOrder = [
+    "Upcoming",
+    "Today",
+    "Yesterday",
+    "Last Week",
+    "Last Month",
+    "Older",
+  ];
+
   const groupedAppointments = groupAppointmentsByDate(
-    visibleAppointments.sort(
-      (a, b) =>
-        new Date(b.matchDate).getTime() -
-        new Date(a.matchDate).getTime()
-    )
+    [...visibleAppointments].sort((a, b) => {
+      const aDate = parseLocalDate(a.matchDate);
+      const bDate = parseLocalDate(b.matchDate);
+
+      return bDate.getTime() - aDate.getTime();
+    })
   );
 
   if (loading) {
@@ -475,18 +494,29 @@ const RefereeDashboard: React.FC = () => {
               ) : (
                 <div className="divide-y divide-slate-100">
                   <div>
-                    {Object.entries(groupedAppointments).map(
-                      ([groupName, appointments]) =>
-                        appointments.length > 0 && (
-                          <div key={groupName}>
-                            <div className="sticky top-0 bg-slate-100 px-6 py-3 border-y border-slate-200">
-                              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                                {groupName}
-                              </h3>
-                            </div>
 
-                            <div className="divide-y divide-slate-100">
-                              {appointments.map((appt: any) => (
+                    {groupOrder.map((groupName) => {
+                      const appointments = groupedAppointments[groupName] || [];
+
+                      if (appointments.length === 0) return null;
+
+                      return (
+                        <div key={groupName}>
+                          <div className="sticky top-0 z-10 bg-slate-100 px-6 py-3 border-y border-slate-200">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                              {groupName}
+                            </h3>
+                          </div>
+
+                          <div className="divide-y divide-slate-100">
+                            {appointments
+                              .sort((a: any, b: any) => {
+                                const dateA = new Date(`${a.matchDate}T${a.matchTime || "00:00"}`);
+                                const dateB = new Date(`${b.matchDate}T${b.matchTime || "00:00"}`);
+
+                                return dateB.getTime() - dateA.getTime();
+                              })
+                              .map((appt: any) => (
                                 <div
                                   key={appt.id}
                                   className="p-6 hover:bg-slate-50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
@@ -551,10 +581,10 @@ const RefereeDashboard: React.FC = () => {
                                   )}
                                 </div>
                               ))}
-                            </div>
                           </div>
-                        )
-                    )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
