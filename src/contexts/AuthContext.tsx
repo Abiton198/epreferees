@@ -8,7 +8,7 @@ import {
   signOut as firebaseSignOut
 } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 
 interface AuthContextType {
   user: User | null;
@@ -34,17 +34,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [role, setRole] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubDoc: (() => void) | null = null;
+
+    const unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      if (unsubDoc) {
+        unsubDoc();
+        unsubDoc = null;
+      }
+
       setUser(firebaseUser);
+
       if (firebaseUser) {
-        const snap = await getDoc(doc(db, "users", firebaseUser.uid));
-        setRole(snap.exists() ? snap.data().role ?? null : null);
+        unsubDoc = onSnapshot(doc(db, "users", firebaseUser.uid), (snap) => {
+          setRole(snap.exists() ? snap.data()?.role ?? null : null);
+          setLoading(false);
+        });
       } else {
         setRole(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
-    return unsub;
+
+    return () => {
+      unsubAuth();
+      if (unsubDoc) unsubDoc();
+    };
   }, []);
 
 

@@ -11,7 +11,6 @@ import {
   User, Phone, Shield, Shirt, CreditCard, MapPin, CheckCircle2, X, AlertTriangle
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { DialogClose } from '@/components/ui/dialog';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
@@ -263,13 +262,24 @@ const SetupProfileModal = ({
   return (
     <>
       <Dialog
-      // open={open}
-      // onOpenChange={(isOpen) => {
-      //   // Clicking outside or pressing Esc triggers the confirm dialog
-      //   if (!isOpen) setShowCancelConfirm(true);
-      // }}
+        open={open}
+        onOpenChange={(isOpen) => {
+          // Clicking outside or pressing Esc triggers the confirm dialog
+          // instead of closing the form outright.
+          if (!isOpen) setShowCancelConfirm(true);
+        }}
       >
-        <DialogContent className="sm:max-w-2xl p-0 gap-0 overflow-hidden">
+        <DialogContent
+          className="sm:max-w-2xl p-0 gap-0 overflow-hidden"
+          onInteractOutside={(e) => {
+            e.preventDefault();
+            setShowCancelConfirm(true);
+          }}
+          onEscapeKeyDown={(e) => {
+            e.preventDefault();
+            setShowCancelConfirm(true);
+          }}
+        >
 
           {/* ── Header ──────────────────────────────────────────────────── */}
           <div className="bg-gradient-to-r from-[#006747] to-[#009060] px-6 pt-6 pb-4">
@@ -441,32 +451,14 @@ const SetupProfileModal = ({
             )}
           </div>
         </DialogContent>
-        <DialogContent
-          className="sm:max-w-2xl p-0 gap-0 overflow-hidden [&>button:last-of-type]:hidden"
-          onInteractOutside={(e) => {
-            e.preventDefault();           // prevent closing on outside click
-            setShowCancelConfirm(true);   // show confirm instead
-          }}
-          onEscapeKeyDown={(e) => {
-            e.preventDefault();           // prevent Esc from closing directly
-            setShowCancelConfirm(true);   // show confirm instead
-          }}
-        >
-          <CancelConfirmDialog
-            open={showCancelConfirm}
-            onStay={() => setShowCancelConfirm(false)}
-            onLeave={handleCancelConfirmed}
-          />
-        </DialogContent>
       </Dialog>
 
       {/* ── Cancel confirmation ──────────────────────────────────────────── */}
-      {/* <CancelConfirmDialog
+      <CancelConfirmDialog
         open={showCancelConfirm}
         onStay={() => setShowCancelConfirm(false)}
         onLeave={handleCancelConfirmed}
-      /> */}
-
+      />
     </>
   );
 };

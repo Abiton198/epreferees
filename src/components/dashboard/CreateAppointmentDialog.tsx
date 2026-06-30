@@ -93,50 +93,58 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
 
   useEffect(() => {
     if (!open) return;
-
     const fetchData = async () => {
       setFetchingData(true);
       try {
-        // 1. Fetch from all possible sources
-        const [teamsSnap, refSnap, usersSnap] = await Promise.all([
+        const [teamsSnap, usersSnap, refereesSnap] = await Promise.all([
           getDocs(collection(db, 'teams')),
-          getDocs(collection(db, 'referees')),
           getDocs(query(collection(db, 'users'), where('role', '==', 'referee'))),
+          getDocs(collection(db, 'referees')),
         ]);
 
         setTeams(teamsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Team)));
 
-        // 2. Map old referees collection
-        const refs = refSnap.docs.map(d => {
+        const getDisplayName = (data) =>
+          data.full_name ||
+          data.fullName ||
+          data.displayName ||
+          data.name ||
+          data.email ||
+          'Unnamed Ref';
+
+        const normalizeEmail = (s) => (s || '').trim().toLowerCase();
+
+        const byEmail = new Map();
+
+        // 1. Seed with users collection
+        usersSnap.docs.forEach(d => {
           const data = d.data();
-          return {
+          const email = normalizeEmail(data.email);
+          if (!email) return; // skip records with no email, can't dedupe safely
+          byEmail.set(email, {
             id: d.id,
             ...data,
-            // Support both naming conventions
-            displayName: data.full_name || data.displayName || data.name || 'Unnamed Ref'
-          };
+            displayName: getDisplayName(data),
+          });
         });
 
-        // 3. Map new users collection (already filtered by role in the query)
-        const refUsers = usersSnap.docs.map(d => {
+        // 2. Overlay referees collection — wins on conflict (richer profile)
+        refereesSnap.docs.forEach(d => {
           const data = d.data();
-          return {
-            // Check the doc ID, then the uid field, then fallback to a random string
-            id: d.id || data.uid || data.id,
+          const email = normalizeEmail(data.email);
+          if (!email) return;
+          const existing = byEmail.get(email);
+          byEmail.set(email, {
+            ...(existing || {}),
             ...data,
-            displayName: data.full_name || data.displayName || 'Unnamed Ref'
-          };
+            id: d.id, // prefer referees doc id since it has the fuller profile
+            displayName: getDisplayName(data),
+          });
         });
 
-        // 4. Merge and de-duplicate by ID
-        // We use a Map where the Key is the ID to ensure each referee appears only once
-        const combinedMap = new Map();
-        [...refs, ...refUsers].forEach(r => combinedMap.set(r.id, r));
+        const refereeUsers = Array.from(byEmail.values());
+        setReferees(refereeUsers);
 
-        const uniqueRefs = Array.from(combinedMap.values());
-        setReferees(uniqueRefs);
-
-        // 5. Handle Edit Mode pre-fill with camelCase support
         if (editData) {
           setFormData({
             competitionType: editData.competitionType || '',
@@ -146,13 +154,12 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
             teamBId: editData.awayTeamId || '',
             teamBManual: !editData.awayTeamId ? editData.awayTeam : '',
             teamLevel: editData.teamLevel || 'main',
-            // Prioritize camelCase (matchDate) but fallback to snake_case (date)
             matchDate: editData.matchDate || editData.date || '',
             matchTime: editData.matchTime || editData.time || '',
             venue: editData.venue || '',
             refereeId: editData.refereeId || '',
             refereeRole: editData.refereeRole || 'referee',
-            officialRole: editData.officialRole || "Referee",
+            officialRole: editData.officialRole || 'Referee',
             notes: editData.notes || ''
           });
         }
@@ -162,9 +169,9 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
         setFetchingData(false);
       }
     };
-
     fetchData();
   }, [open, editData]);
+
 
   // ─── Logic ──────────────────────────────────────────────────────────────────
 
@@ -562,7 +569,11 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
                 <select
                   className="w-full p-2 border rounded-md"
                   value={selectedRole}
-                  onChange={(e) => setSelectedRole(e.target.value)}
+                  onChange={(e) => {
+                    const role = e.target.value;
+                    setSelectedRole(role);
+                    updateField("officialRole", role);
+                  }}
                 >
                   {officialRoles.map((role) => (
                     <option key={role} value={role}>

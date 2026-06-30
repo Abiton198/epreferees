@@ -20,193 +20,170 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
-// ---------------------------------------------------------------------------
-// What "incomplete" means:
-//   - No Firestore doc at all (auth exists, doc missing — edge case)
-//   - Doc exists but profileIncomplete === true
-//   - Doc exists but isNewUser === true  (legacy / skipped-setup path)
-//   - Doc exists but role is missing entirely
-//
-// Incomplete flow:
-//   1. If no role stored → show RoleSelectionModal
-//   2. If role === 'referee' (or just became referee) → show SetupProfileModal
-//   3. If role === 'coach' → send straight to coach dashboard
-//      (coaches have no extra setup step; add one here if that changes)
-// ---------------------------------------------------------------------------
+type Stage = 'auth' | 'role-select' | 'setup' | 'done';
 
 const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
 
-  // ── UI state ──────────────────────────────────────────────────────────────
   const [tab, setTab] = useState<'login' | 'signup'>('login');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  // ── Form state ────────────────────────────────────────────────────────────
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
 
-  // ── Post-auth modal state ─────────────────────────────────────────────────
-  const [showRoleSelection, setShowRoleSelection] = useState(false);
-  const [showSetup, setShowSetup] = useState(false);
-  // pendingUser holds whichever shape we have at that point in the flow
+  // Single source of truth for the post-auth flow. Replaces the old
+  // showRoleSelection/showSetup booleans, which could briefly both be
+  // false at once (because of the awaits in between setting them),
+  // flashing this Dialog back open mid-transition.
+  const [stage, setStage] = useState<Stage>('auth');
   const [pendingUser, setPendingUser] = useState<any>(null);
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
-  /** Open the role picker, storing what we know about the user so far. */
   const openRolePicker = (userSnapshot: any) => {
     setPendingUser(userSnapshot);
-    setShowRoleSelection(true);
+    setStage('role-select');
   };
 
-  /** Open the referee profile-setup modal. */
   const openSetup = (userSnapshot: any) => {
+    console.log('[LoginModal] openSetup called with:', userSnapshot);
     setPendingUser(userSnapshot);
-    setShowSetup(true);
+    setStage('setup');
   };
 
-  /** Navigate to the correct dashboard and close the login modal. */
   const goToDashboard = (role: UserRole) => {
-    navigate(`/dashboard/${role}`);
+    setStage('done');
     onOpenChange(false);
+    navigate(`/dashboard/${role}`);
   };
 
-  // ── Core routing decision ─────────────────────────────────────────────────
-  /**
-   * Single entry point after any successful Firebase auth.
-   * Reads (or creates) the Firestore doc and decides what to show next.
-   */
   const handleUserRouting = async (
     firebaseUser: any,
     isNewRegistration: boolean,
+    intendedRole: UserRole | null = null,
   ) => {
     if (!firebaseUser?.uid) return;
 
-    const userRef = doc(db, 'users', firebaseUser.uid);
-    const snap = await getDoc(userRef);
+    try {
+      const userRef = doc(db, 'users', firebaseUser.uid);
+      const snap = await getDoc(userRef);
 
-    // ── Case 1: No Firestore doc at all ──────────────────────────────────────
-    // Could be a brand-new signup OR a returning auth user whose doc was lost.
-    if (!snap.exists()) {
-      if (isNewRegistration) {
-        // New user — write a skeletal doc so the UID is claimed, then ask role
+      if (!snap.exists()) {
         const skeleton = {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
-          full_name: fullName || firebaseUser.displayName || '',
-          role: null,          // intentionally null until role picker resolves
+          full_name: fullName || firebaseUser.displayName || "",
+          role: intendedRole,
           isNewUser: true,
           profileIncomplete: true,
-          status: 'active',
+          status: "active",
           approved: true,
           createdAt: serverTimestamp(),
         };
+
         await setDoc(userRef, skeleton);
-        openRolePicker({ ...skeleton, uid: firebaseUser.uid });
-      } else {
-        // Sign-in with no doc — treat as incomplete new user
-        openRolePicker({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          full_name: firebaseUser.displayName || '',
-          role: null,
-          isNewUser: true,
-          profileIncomplete: true,
-        });
+
+        if (intendedRole === 'referee') {
+          openSetup(skeleton);
+        } else {
+          openRolePicker(skeleton);
+        }
+        return;
       }
-      return;
-    }
 
-    // ── Case 2: Doc exists ───────────────────────────────────────────────────
-    const data = snap.data();
+      const data = snap.data();
 
-    // 2a. No role set at all → must pick one
-    if (!data.role) {
-      openRolePicker(data);
-      return;
-    }
+      if (!data.role) {
+        openRolePicker(data);
+        return;
+      }
 
-    // 2b. Role is set but profile is still incomplete — always go to setup
-    // Coaches do not require profile setup
-    if (data.role === 'coach') {
-      if (data.profileIncomplete || data.isNewUser) {
-        await updateDoc(userRef, {
-          profileIncomplete: false,
-          isNewUser: false,
-        });
-
+      if (data.role === 'coach') {
+        if (data.profileIncomplete || data.isNewUser) {
+          await updateDoc(userRef, {
+            profileIncomplete: false,
+            isNewUser: false,
+          });
+        }
         goToDashboard('coach');
         return;
       }
-    }
 
-    // Referees require profile setup
-    if (
-      data.role === 'referee' &&
-      (data.profileIncomplete || data.isNewUser)
-    ) {
-      openSetup(data);
+      if (data.role === 'referee' && (data.profileIncomplete || data.isNewUser)) {
+        openSetup(data);
+        return;
+      }
+
+      goToDashboard(data.role as UserRole);
+    } catch (error: any) {
+      toast({ title: 'Routing Error', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  const handleRoleChosen = async (role: UserRole, skipped = false) => {
+    // console.log('[LoginModal] handleRoleChosen fired —', { role, skipped, pendingUser });
+
+    if (!pendingUser) {
+      console.warn('[LoginModal] handleRoleChosen aborted: pendingUser is null');
       return;
     }
 
-    // 2c. Everything is in order → route normally
-    goToDashboard(data.role as UserRole);
-  };
-
-  // ── Role selection callback ───────────────────────────────────────────────
-  /**
-   * Called when the user picks a role, or skips (defaults to 'referee').
-   * Updates Firestore and then continues the appropriate sub-flow.
-   */
-  const handleRoleChosen = async (role: UserRole, skipped = false) => {
-    setShowRoleSelection(false);
-    if (!pendingUser) return;
-
     const userRef = doc(db, 'users', pendingUser.uid);
 
-    if (role === 'coach') {
-      // Coaches have no extra setup step — mark profile complete immediately
-      await updateDoc(userRef, {
-        role: 'coach',
-        isNewUser: false,
-        profileIncomplete: false,
-        setupCompleted: true,
-      });
-
-      setPendingUser({
-        ...pendingUser,
-        role: 'coach',
-      });
-
-      goToDashboard('coach');
-    } else {
-      // Referees (or skipped) still need profile setup
-      await updateDoc(userRef, {
-        role,
-        isNewUser: true,
-        profileIncomplete: true,
-      });
-      openSetup({ ...pendingUser, role });
+    try {
+      if (role === 'coach') {
+        await updateDoc(userRef, {
+          role: 'coach',
+          isNewUser: false,
+          profileIncomplete: false,
+          setupCompleted: true,
+        });
+        // console.log('[LoginModal] coach updateDoc succeeded, going to dashboard');
+        goToDashboard('coach');
+      } else {
+        await updateDoc(userRef, {
+          role,
+          isNewUser: true,
+          profileIncomplete: true,
+        });
+        // console.log('[LoginModal] referee updateDoc succeeded, calling openSetup');
+        openSetup({ ...pendingUser, role });
+      }
+    } catch (error: any) {
+      // console.error('[LoginModal] handleRoleChosen updateDoc threw:', error);
+      toast({ title: 'Could not save role', description: error.message, variant: 'destructive' });
+      setStage('role-select');
     }
   };
 
-  // ── Setup completion callback ─────────────────────────────────────────────
   const handleSetupComplete = async () => {
     if (!pendingUser?.uid) return;
-    await updateDoc(doc(db, 'users', pendingUser.uid), {
-      isNewUser: false,
-      profileIncomplete: false,
-    });
-    setShowSetup(false);
-    goToDashboard((pendingUser.role ?? 'referee') as UserRole);
+
+    const userRef = doc(db, "users", pendingUser.uid);
+
+    try {
+      await updateDoc(userRef, {
+        isNewUser: false,
+        profileIncomplete: false,
+      });
+
+      const snap = await getDoc(userRef);
+      const role = snap.data()?.role as UserRole;
+
+      if (!role) {
+        throw new Error('No role found on user document after setup.');
+      }
+
+      goToDashboard(role);
+    } catch (error: any) {
+      console.error('handleSetupComplete failed:', error);
+      toast({ title: 'Could not finish setup', description: error.message, variant: 'destructive' });
+    }
   };
 
-  // ── Auth handlers ─────────────────────────────────────────────────────────
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
     setStatusMessage(null);
@@ -214,8 +191,6 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
-      // Google sign-in could be a new user or a returning one —
-      // handleUserRouting checks the doc to decide.
       await handleUserRouting(result.user, tab === 'signup');
     } catch (err: any) {
       toast({ title: 'Auth error', description: err.message, variant: 'destructive' });
@@ -230,8 +205,6 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
     setStatusMessage(null);
     try {
       const result = await signIn(email, password);
-      // isNewRegistration = false for a sign-in, but handleUserRouting will
-      // still catch incomplete profiles via the doc flags.
       await handleUserRouting(result.user, false);
     } catch (err: any) {
       toast({ title: 'Login failed', description: err.message, variant: 'destructive' });
@@ -245,9 +218,8 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
     setLoading(true);
     setStatusMessage(null);
     try {
-      // Pass a throwaway role here — it gets overwritten after role picker.
       const result = await signUp(email, password, fullName, 'referee');
-      await handleUserRouting(result.user, true);
+      await handleUserRouting(result.user, true, 'referee');
     } catch (err: any) {
       toast({ title: 'Signup failed', description: err.message, variant: 'destructive' });
     } finally {
@@ -255,10 +227,9 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
     }
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open && stage === 'auth'} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold text-center text-[#006747]">
@@ -279,7 +250,6 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
               <TabsTrigger value="signup">Register</TabsTrigger>
             </TabsList>
 
-            {/* ── Sign in tab ─────────────────────────────────────────────── */}
             <TabsContent value="login">
               <form onSubmit={handleLogin} className="space-y-4 mt-4">
                 <div>
@@ -327,7 +297,6 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
               </form>
             </TabsContent>
 
-            {/* ── Register tab ────────────────────────────────────────────── */}
             <TabsContent value="signup">
               <form onSubmit={handleSignup} className="space-y-4 mt-4">
                 <div>
@@ -358,7 +327,7 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
                   </div>
                 </div>
                 <Button className="w-full bg-[#006747] hover:bg-[#004d35]" disabled={loading}>
-                  {loading && <Loader2 className="mr-2 animate-spin" size={16} />}
+                  {loading && <Loader2 className="mr-2 animate-spin text-white" size={16} />}
                   Create Account
                 </Button>
                 <Button
@@ -377,17 +346,15 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
         </DialogContent>
       </Dialog>
 
-      {/* Role picker — fires for new users AND returning users with no role */}
       <RoleSelectionModal
-        open={showRoleSelection}
+        open={stage === 'role-select'}
         onSelect={(role) => handleRoleChosen(role, false)}
         onDismiss={() => handleRoleChosen('referee', true)}
       />
 
-      {/* Referee profile setup — fires whenever a referee's profile is incomplete */}
-      {showSetup && pendingUser && (
+      {stage === 'setup' && pendingUser && (
         <SetupProfileModal
-          open={showSetup}
+          open={stage === 'setup'}
           uid={pendingUser.uid}
           onComplete={handleSetupComplete}
         />
