@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,6 +43,22 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
   const [stage, setStage] = useState<Stage>('auth');
   const [pendingUser, setPendingUser] = useState<any>(null);
 
+  // Reset the entire flow whenever the modal is (re-)opened.
+  // Without this, stage stays at 'done' or 'setup' from a previous
+  // session if the component was never unmounted, which prevents
+  // the login dialog from appearing on subsequent opens.
+  useEffect(() => {
+    if (open) {
+      setStage('auth');
+      setTab('login');
+      setEmail('');
+      setPassword('');
+      setFullName('');
+      setStatusMessage(null);
+      setPendingUser(null);
+    }
+  }, [open]);
+
   const openRolePicker = (userSnapshot: any) => {
     setPendingUser(userSnapshot);
     setStage('role-select');
@@ -69,9 +85,23 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
 
     try {
       const userRef = doc(db, 'users', firebaseUser.uid);
-      const snap = await getDoc(userRef);
+      const snap = await getDoc(userRef)
 
       if (!snap.exists()) {
+        // ── GUARD: returning users should always have a doc ──────────────
+        // If this is a sign-in (not a fresh registration) and no doc exists,
+        // it's almost always a local/prod environment mismatch, NOT a real
+        // new user. Block here instead of silently creating a broken skeleton.
+        if (!isNewRegistration) {
+          toast({
+            title: 'Profile data not found',
+            description: 'Your account exists but your profile could not be loaded. This is usually a local vs production environment mismatch. Check your Firebase config.',
+            variant: 'destructive',
+          });
+          return;
+        }
+
+        // Genuinely new registration — create skeleton as before
         const skeleton = {
           uid: firebaseUser.uid,
           email: firebaseUser.email,

@@ -25,7 +25,7 @@ import type { Appointment, AppointmentStatus, Profile } from '@/types';
 import {
   Plus, Search, ScrollText, Printer, Calendar,
   MapPin, Trophy, CheckCircle2, Clock, XCircle,
-  Loader2, Pencil, Trash2
+  Loader2, Pencil, Trash2, MessageSquareWarning
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { TeamRegistrationForm } from './TeamRegistrationForm';
@@ -57,6 +57,9 @@ const CoachDashboard: React.FC = () => {
   // Delete confirm state
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Reason modal state
+  const [reasonAppt, setReasonAppt] = useState<Appointment | null>(null);
 
   // Team Registration
   const [teamRegistrationOpen, setTeamRegistrationOpen] = useState(false);
@@ -313,6 +316,7 @@ const CoachDashboard: React.FC = () => {
 
 
 
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -431,6 +435,8 @@ const CoachDashboard: React.FC = () => {
           </Select>
         </div>
 
+
+
         {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
           {loading ? (
@@ -547,6 +553,7 @@ const CoachDashboard: React.FC = () => {
                           )}
                         </td>
 
+
                         {/* Status */}
                         <td className="px-6 py-4 text-center">
                           <div className="flex flex-col items-center gap-1">
@@ -562,6 +569,16 @@ const CoachDashboard: React.FC = () => {
                               <span className="text-[10px] text-gray-500 italic">
                                 {getStatusTimestamp(a)}
                               </span>
+                            )}
+
+                            {!isDeleted && a.status === 'rejected' && (a as any).rejectionReason && (
+                              <button
+                                onClick={() => setReasonAppt(a)}
+                                className="mt-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-red-600 bg-red-50 border border-red-200 px-2 py-1 rounded-full hover:bg-red-100 transition-colors"
+                              >
+                                <MessageSquareWarning className="w-3 h-3" />
+                                View Reason
+                              </button>
                             )}
                           </div>
                         </td>
@@ -647,6 +664,8 @@ const CoachDashboard: React.FC = () => {
       {/* Audit trail drawer */}
       <AuditTrailDrawer appointmentId={auditId} onClose={() => setAuditId(null)} />
 
+
+
       {/* ── Edit Modal ── */}
       <Dialog open={!!editAppt} onOpenChange={v => !v && setEditAppt(null)}>
         <DialogContent className="sm:max-w-md">
@@ -711,6 +730,48 @@ const CoachDashboard: React.FC = () => {
               Yes, Delete
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!reasonAppt} onOpenChange={(open) => !open && setReasonAppt(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <span className="bg-red-100 p-2 rounded-full">
+                <MessageSquareWarning className="w-5 h-5 text-red-600" />
+              </span>
+              Decline Reason
+            </DialogTitle>
+          </DialogHeader>
+
+          {reasonAppt && (
+            <div className="py-2 space-y-4">
+              <div className="text-center pb-3 border-b border-slate-100">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Fixture</p>
+                <h4 className="text-lg font-black text-slate-900">
+                  {reasonAppt.homeTeam} vs {reasonAppt.awayTeam}
+                </h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  {reasonAppt.matchDate} @ {reasonAppt.matchTime}
+                </p>
+              </div>
+
+              <div className="bg-red-50 border border-red-100 rounded-lg p-4">
+                <p className="text-[10px] uppercase font-bold text-red-500 tracking-wider mb-1">
+                  {reasonAppt.refereeName || 'Referee'}'s Reason
+                </p>
+                <p className="text-sm text-red-900 whitespace-pre-wrap">
+                  {reasonAppt.rejectionReason}
+                </p>
+              </div>
+
+              {reasonAppt.updatedAt && (
+                <p className="text-[11px] text-slate-400 text-center italic">
+                  Declined {getStatusTimestamp(reasonAppt)}
+                </p>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

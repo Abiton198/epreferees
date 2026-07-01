@@ -13,6 +13,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 
 
 const queryClient = new QueryClient();
+// console.log('FIREBASE PROJECT:', import.meta.env.VITE_FIREBASE_PROJECT_ID);
 
 const App = () => (
   <ThemeProvider defaultTheme="light">

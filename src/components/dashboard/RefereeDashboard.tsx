@@ -15,6 +15,7 @@ import { db } from "@/lib/firebase";
 import { useAuth } from '@/contexts/AuthContext';
 import { updateAppointmentStatus } from '@/services/appointments';
 import { toast } from '@/components/ui/use-toast';
+import DeclineReasonModal from './DeclineReasonModal';
 
 // UI Components
 import DashboardHeader from './DashboardHeader';
@@ -65,6 +66,26 @@ const RefereeDashboard: React.FC = () => {
   const cancelledAppointments = appts.filter(
     (a: any) => a.deleted
   );
+  const [declineTarget, setDeclineTarget] = useState<any>(null);
+  const [showDeclineModal, setShowDeclineModal] = useState(false);
+  const [decliningSubmitting, setDecliningSubmitting] = useState(false);
+
+  const openDeclineModal = (appt: any) => {
+    setDeclineTarget(appt);
+    setShowDeclineModal(true);
+  };
+
+  const confirmDecline = async (reason: string) => {
+    if (!declineTarget) return;
+    setDecliningSubmitting(true);
+    try {
+      await handleUpdateStatus(declineTarget, "rejected", reason); // ← third arg is new, see below
+      setShowDeclineModal(false);
+      setDeclineTarget(null);
+    } finally {
+      setDecliningSubmitting(false);
+    }
+  };
 
 
   // Helper — merges two appointment arrays, deduplicates by id, sorts by createdAt
@@ -235,7 +256,7 @@ const RefereeDashboard: React.FC = () => {
   /**
    * 3. ACTIONS
    */
-  const handleUpdateStatus = async (appt: Appointment, newStatus: 'accepted' | 'rejected') => {
+  const handleUpdateStatus = async (appt: Appointment, newStatus: 'accepted' | 'rejected', reason?: string) => {
     setActing(appt.id);
     try {
       const docRef = doc(db, "appointments", appt.id);
@@ -247,13 +268,15 @@ const RefereeDashboard: React.FC = () => {
         refereeEmail: user?.email,     // ← backfills correct email
         auditTrail: [
           ...(appt.auditTrail || []),
+
           {
             action: newStatus,
             by: user?.uid,
             byName: user?.displayName || 'Referee',
             timestamp: new Date().toISOString(),
           }
-        ]
+        ],
+        ...(reason ? { rejectionReason: reason } : {}),
       });
 
       // Custom Toast for Acceptance
@@ -557,9 +580,7 @@ const RefereeDashboard: React.FC = () => {
                                         disabled={!!acting}
                                         variant="outline"
                                         size="sm"
-                                        onClick={() =>
-                                          handleUpdateStatus(appt, "rejected")
-                                        }
+                                        onClick={() => openDeclineModal(appt)}
                                         className="border-red-200 text-red-600 hover:bg-red-50"
                                       >
                                         <X className="w-4 h-4 mr-1" />
@@ -569,9 +590,7 @@ const RefereeDashboard: React.FC = () => {
                                       <Button
                                         disabled={!!acting}
                                         size="sm"
-                                        onClick={() =>
-                                          handleUpdateStatus(appt, "accepted")
-                                        }
+                                        onClick={() => handleUpdateStatus(appt, "accepted")}
                                         className="bg-emerald-600 hover:bg-emerald-700"
                                       >
                                         <Check className="w-4 h-4 mr-1" />
@@ -639,7 +658,12 @@ const RefereeDashboard: React.FC = () => {
             <Button
               variant="outline"
               disabled={!!acting}
-              onClick={() => handleUpdateStatus(newAppt!, "rejected")}
+              onClick={() => {
+                if (newAppt) {
+                  openDeclineModal(newAppt); // open reason modal instead of rejecting directly
+                  setNewAppt(null);          // close the notification popup
+                }
+              }}
               className="w-full"
             >
               Decline
@@ -654,6 +678,17 @@ const RefereeDashboard: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+
+      <DeclineReasonModal
+        open={showDeclineModal}
+        onOpenChange={(open) => {
+          setShowDeclineModal(open);
+          if (!open) setDeclineTarget(null);
+        }}
+        onConfirm={confirmDecline}
+        submitting={decliningSubmitting}
+      />
     </div>
   );
 };
