@@ -104,7 +104,7 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
 
         setTeams(teamsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Team)));
 
-        const getDisplayName = (data) =>
+        const getDisplayName = (data: any) =>
           data.full_name ||
           data.fullName ||
           data.displayName ||
@@ -112,36 +112,38 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
           data.email ||
           'Unnamed Ref';
 
-        const normalizeEmail = (s) => (s || '').trim().toLowerCase();
+        const normalizeEmail = (s: string) => (s || '').trim().toLowerCase();
 
-        const byEmail = new Map();
+        // Single map keyed ONLY by email — this is the sole dedupe key.
+        // referees collection is layered on top so it wins on name/profile
+        // if the same email exists in both collections.
+        const byEmail = new Map<string, any>();
 
-        // 1. Seed with users collection
         usersSnap.docs.forEach(d => {
           const data = d.data();
           const email = normalizeEmail(data.email);
-          if (!email) return; // skip records with no email, can't dedupe safely
+          if (!email) return; // no email = can't place this referee, skip
           byEmail.set(email, {
             id: d.id,
             ...data,
+            email,
             displayName: getDisplayName(data),
           });
         });
 
-        // 2. Overlay referees collection — wins on conflict (richer profile)
         refereesSnap.docs.forEach(d => {
           const data = d.data();
           const email = normalizeEmail(data.email);
-          if (!email) return;
-          const existing = byEmail.get(email);
+          if (!email) return; // no email = can't place this referee, skip
           byEmail.set(email, {
-            ...(existing || {}),
+            id: d.id, // referees doc id wins — this is the canonical profile
             ...data,
-            id: d.id, // prefer referees doc id since it has the fuller profile
+            email,
             displayName: getDisplayName(data),
           });
         });
 
+        // One entry per email, guaranteed
         const refereeUsers = Array.from(byEmail.values());
         setReferees(refereeUsers);
 
