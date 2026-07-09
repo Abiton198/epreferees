@@ -25,7 +25,8 @@ import type { Appointment, AppointmentStatus, Profile } from '@/types';
 import {
   Plus, Search, ScrollText, Printer, Calendar,
   MapPin, Trophy, CheckCircle2, Clock, XCircle,
-  Loader2, Pencil, Trash2, MessageSquareWarning
+  Loader2, Pencil, Trash2, MessageSquareWarning, User,
+  Eye, X, ShieldCheck
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { TeamRegistrationForm } from './TeamRegistrationForm';
@@ -40,11 +41,15 @@ const CoachDashboard: React.FC = () => {
   const [teams, setTeams] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Scope state (executive committee members see ALL appointments)
+  const [isExecutive, setIsExecutive] = useState<boolean | null>(null);
+
   // UI state
   const [createOpen, setCreateOpen] = useState(false);
   const [auditId, setAuditId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [execViewOpen, setExecViewOpen] = useState(false);
 
   // Edit state
   const [editAppt, setEditAppt] = useState<Appointment | null>(null);
@@ -64,19 +69,47 @@ const CoachDashboard: React.FC = () => {
   // Team Registration
   const [teamRegistrationOpen, setTeamRegistrationOpen] = useState(false);
 
+
   // ── Real-time listeners ──────────────────────────────────────────────────
+
+  // 1. Own profile — determines whether this coach is an executive
+  //    committee member (isExecutive flag set via console/Admin SDK only).
   useEffect(() => {
     const uid = user?.uid;
     if (!uid) return;
 
+    const unsub = onSnapshot(
+      doc(db, "users", uid),
+      (snap) => {
+        setIsExecutive(snap.data()?.isExecutive === true);
+      },
+      (err) => {
+        console.error("Profile listener error:", err);
+        setIsExecutive(false); // fail closed to own-appointments scope
+      }
+    );
+
+    return () => unsub();
+  }, [user?.uid]);
+
+  // 2. Appointments — waits until scope is known.
+  //    Executives get the UNFILTERED collection; regular coaches only theirs.
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid || isExecutive === null) return;
+
     setLoading(true);
 
-    // 1. Appointments Query (Using camelCase coachId)
-    const apptQuery = query(
-      collection(db, "appointments"),
-      where("coachId", "==", uid),
-      orderBy("createdAt", "desc")
-    );
+    const apptQuery = isExecutive
+      ? query(
+        collection(db, "appointments"),
+        orderBy("createdAt", "desc")
+      )
+      : query(
+        collection(db, "appointments"),
+        where("coachId", "==", uid),
+        orderBy("createdAt", "desc")
+      );
 
     const unsubAppts = onSnapshot(
       apptQuery,
@@ -91,7 +124,15 @@ const CoachDashboard: React.FC = () => {
       }
     );
 
-    // 2. Updated Referees Listener (Now fetching from 'users' collection)
+    return () => unsubAppts();
+  }, [user?.uid, isExecutive]);
+
+  // 3. Referees + Teams
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) return;
+
+    // Referees (from 'users' collection)
     const unsubRefs = onSnapshot(
       query(collection(db, "users"), where("role", "==", "referee")),
       (snapshot) => {
@@ -109,13 +150,12 @@ const CoachDashboard: React.FC = () => {
       }
     );
 
-    // 3. Teams Listener
+    // Teams
     const unsubTeams = onSnapshot(collection(db, "teams"), (snapshot) => {
       setTeams(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
     return () => {
-      unsubAppts();
       unsubRefs();
       unsubTeams();
     };
@@ -123,8 +163,9 @@ const CoachDashboard: React.FC = () => {
 
 
   // ── Computed values ───────────────────────────────────────────────────────
-  const visibleAppointments = appts.filter(
-    (a: any) => !a.deleted
+  const visibleAppointments = useMemo(
+    () => appts.filter((a: any) => !a.deleted),
+    [appts]
   );
 
   const filtered = useMemo(() => visibleAppointments.filter((a) => {
@@ -135,7 +176,7 @@ const CoachDashboard: React.FC = () => {
       a.awayTeam?.toLowerCase().includes(q) ||
       a.venue?.toLowerCase().includes(q);
     return matchesStatus && matchesSearch;
-  }), [appts, search, statusFilter]);
+  }), [visibleAppointments, search, statusFilter]);
 
   const stats = useMemo(() => ({
     total: appts.filter(a => !a.deleted).length,
@@ -161,13 +202,82 @@ const CoachDashboard: React.FC = () => {
   const venues = useMemo(() =>
     [...new Set(teams.map(t => t.homeGround))].filter(Boolean), [teams]);
 
+  /**
+   * Executive overview grouping:
+   *  - current : match date in the current week (Mon–Sun) or in the future
+   *  - lastWeek: match date within the previous week
+   *  - older   : anything earlier (or with no parseable date)
+   */
+  const groupedAppointments = useMemo(() => {
+    const now = new Date();
+    const mondayOffset = (now.getDay() + 6) % 7; // days elapsed since Monday
+    const startOfThisWeek = new Date(
+      now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset
+    );
+    const startOfLastWeek = new Date(startOfThisWeek);
+    startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
+
+    const current: Appointment[] = [];
+    const lastWeek: Appointment[] = [];
+    const older: Appointment[] = [];
+
+    visibleAppointments.forEach((a) => {
+      const d = a.matchDate ? new Date(`${a.matchDate}T00:00:00`) : null;
+      const valid = d && !isNaN(d.getTime());
+
+      if (valid && d! >= startOfThisWeek) {
+        current.push(a);
+      } else if (valid && d! >= startOfLastWeek) {
+        lastWeek.push(a);
+      } else {
+        older.push(a);
+      }
+    });
+
+    const byDateAsc = (x: Appointment, y: Appointment) =>
+      (x.matchDate || '').localeCompare(y.matchDate || '');
+    const byDateDesc = (x: Appointment, y: Appointment) =>
+      (y.matchDate || '').localeCompare(x.matchDate || '');
+
+    current.sort(byDateAsc);   // soonest fixtures first
+    lastWeek.sort(byDateDesc); // most recent first
+    older.sort(byDateDesc);
+
+    return { current, lastWeek, older };
+  }, [visibleAppointments]);
+
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /** Resolve the name of the coach who created (appointed) this fixture. */
+  const getAppointerName = (a: any): string =>
+    a.coachName ||
+    a.auditTrail?.find((e: any) => e.action === 'created')?.byName ||
+    'Unknown';
+
+  const getStatusTimestamp = (appt: any) => {
+    if (!appt.auditTrail || appt.status === 'pending') return null;
+
+    const entry = [...appt.auditTrail]
+      .reverse()
+      .find((e: any) => e.action === appt.status);
+
+    if (!entry || !entry.timestamp) return null;
+
+    const date = new Date(entry.timestamp);
+    return date.toLocaleString('en-ZA', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
 
   // ── Delete ────────────────────────────────────────────────────────────────
   const handleDeleteClick = (a: Appointment) => {
     setDeleteId(a.id);
   };
-
-  // CONFIRM DELETE FUNCTION
 
   const handleConfirmDelete = async () => {
     if (!deleteId) return;
@@ -192,7 +302,11 @@ const CoachDashboard: React.FC = () => {
           {
             action: "deleted",
             by: user?.uid || "unknown",
-            byName: user?.displayName || user?.email || "Coach",
+            byName:
+              (appointment as any).coachName ||
+              user?.displayName ||
+              user?.email ||
+              "Coach",
             byRole: "coach",
             timestamp: new Date().toISOString(),
             details: {
@@ -248,6 +362,21 @@ const CoachDashboard: React.FC = () => {
       // 1. Ensure we have a valid reference
       const docRef = doc(db, "appointments", editAppt.id);
 
+      // Resolve the appointer's display name reliably
+      const resolveByName = (): string => {
+        // 1. If the editor is the coach who owns this appointment, use the stored coachName
+        if (user?.uid && user.uid === (editAppt as any).coachId && (editAppt as any).coachName) {
+          return (editAppt as any).coachName;
+        }
+        // 2. Look up their name from a previous audit entry by the same uid
+        const prevEntry = ((editAppt as any).auditTrail || []).find(
+          (e: any) => e.by === user?.uid && e.byName
+        );
+        if (prevEntry) return prevEntry.byName;
+        // 3. Fall back to Auth profile, then email
+        return user?.displayName || user?.email || 'Coach';
+      };
+
       // 2. Create a clean update object (avoiding undefined values)
       const updateData = {
         matchDate: editDate || "",
@@ -261,17 +390,17 @@ const CoachDashboard: React.FC = () => {
           ...((editAppt as any).auditTrail || []),
           {
             action: 'edited',
-            by: user?.uid || 'unknown_id', // Fallback for ID
-            byName: user?.displayName || user?.email || 'Coach',
+            by: user?.uid || 'unknown_id',
+            byName: resolveByName(),
             byRole: 'coach',
             timestamp: new Date().toISOString(),
             details: {
               date: editDate || "",
               time: editTime || "",
               venue: editVenue || "",
-              notes: editNotes || ""
+              notes: editNotes || "",
             },
-          }
+          },
         ]
       };
 
@@ -280,7 +409,7 @@ const CoachDashboard: React.FC = () => {
       toast({ title: "Appointment updated" });
       setEditAppt(null);
     } catch (err: any) {
-      console.error("Firestore Update Error:", err); // Log the full error to see exactly which field failed
+      console.error("Firestore Update Error:", err);
       toast({
         title: "Update failed",
         description: err.message,
@@ -292,29 +421,93 @@ const CoachDashboard: React.FC = () => {
   };
 
 
-  const getStatusTimestamp = (appt: any) => {
-    console.log('auditTrail for', appt.id, appt.auditTrail);
+  // ── Sub-render: one appointment row inside the executive overview ────────
+  const renderExecRow = (a: Appointment) => (
+    <div
+      key={a.id}
+      className="border border-slate-200 rounded-lg p-3 bg-white shadow-sm hover:border-emerald-200 transition-colors"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-bold text-slate-800">
+          {a.homeTeam}
+          <span className="text-slate-400 font-normal mx-1 text-xs">vs</span>
+          {a.awayTeam}
+        </span>
+        <StatusBadge status={a.status as AppointmentStatus} />
+      </div>
 
-    if (!appt.auditTrail || appt.status === 'pending') return null;
+      <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="flex items-center gap-1">
+          <Calendar className="w-3 h-3 text-slate-400" />
+          {a.matchDate || 'TBC'}{a.matchTime ? ` @ ${a.matchTime}` : ''}
+        </span>
+        <span className="flex items-center gap-1">
+          <MapPin className="w-3 h-3 text-slate-400" />
+          {a.venue || 'Venue TBC'}
+        </span>
+      </div>
 
-    const entry = [...appt.auditTrail]
-      .reverse()
-      .find(e => e.action === appt.status);
+      <div className="flex flex-wrap items-center gap-2 mt-2">
+        <div className="text-[10px] font-bold text-emerald-700 flex items-center gap-1 uppercase tracking-tighter bg-emerald-50 w-fit px-1.5 py-0.5 rounded">
+          <Trophy className="w-3 h-3" />
+          {(a as any).competition || 'League Match'}
+        </div>
 
-    console.log('matched entry:', entry);
+        <div className="text-[10px] text-slate-500 flex items-center gap-1">
+          <User className="w-3 h-3 text-slate-400" />
+          Appointed by:{' '}
+          <span className="font-semibold text-slate-700">
+            {getAppointerName(a)}
+          </span>
+        </div>
 
-    if (!entry || !entry.timestamp) return null;
+        {a.refereeId && (
+          <div className="text-[10px] text-slate-500">
+            Referee:{' '}
+            <span className="font-semibold text-slate-700">
+              {(a as any).refereeName ||
+                referees[a.refereeId]?.full_name ||
+                'Assigned Official'}
+            </span>
+          </div>
+        )}
+      </div>
 
-    const date = new Date(entry.timestamp);
-    return date.toLocaleString('en-ZA', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+      {a.status !== 'pending' && getStatusTimestamp(a) && (
+        <div className="text-[10px] text-slate-400 italic mt-1">
+          {a.status === 'accepted' ? 'Accepted' : 'Updated'} {getStatusTimestamp(a)}
+        </div>
+      )}
+    </div>
+  );
 
+  const renderExecSection = (
+    label: string,
+    items: Appointment[],
+    accent: string
+  ) => (
+    <div key={label}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`text-[11px] font-black uppercase tracking-widest ${accent}`}>
+          {label}
+        </span>
+        <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+          {items.length}
+        </span>
+        <div className="flex-1 h-px bg-slate-100" />
+      </div>
 
+      {items.length === 0 ? (
+        <p className="text-xs text-slate-400 italic mb-4">
+          No appointments in this period.
+        </p>
+      ) : (
+        <div className="space-y-2 mb-4">
+          {items.map(renderExecRow)}
+        </div>
+      )}
+    </div>
+  );
 
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -332,9 +525,24 @@ const CoachDashboard: React.FC = () => {
               Logged in as <span className="font-bold text-[#006747]">
                 {user?.displayName || user?.email || 'Coach'}
               </span>
+              {isExecutive && (
+                <span className="not-italic ml-2 inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full align-middle">
+                  <ShieldCheck className="w-3 h-3" />
+                  Executive Committee
+                </span>
+              )}
             </p>
           </div>
           <div className="flex gap-2 print:hidden">
+            {isExecutive && (
+              <Button
+                variant="outline"
+                onClick={() => setExecViewOpen(true)}
+                className="shadow-sm border-emerald-200 text-emerald-800 hover:bg-emerald-50"
+              >
+                <Eye className="w-4 h-4 mr-2" /> All Appointments
+              </Button>
+            )}
             <Button variant="outline" onClick={() => window.print()} className="shadow-sm">
               <Printer className="w-4 h-4 mr-2" /> Report
             </Button>
@@ -472,16 +680,17 @@ const CoachDashboard: React.FC = () => {
                 <tbody className="divide-y divide-gray-100">
                   {filtered.map((a) => {
                     const isDeleted = (a as any).deleted;
+                    const appointerName = getAppointerName(a);
 
                     return (
                       <tr
                         key={a.id}
                         className={`
-          group transition-colors
-          ${isDeleted
+                          group transition-colors
+                          ${isDeleted
                             ? 'bg-red-50/30 opacity-45'
                             : 'hover:bg-emerald-50/30'}
-        `}
+                        `}
                       >
                         {/* Fixture */}
                         <td className="px-6 py-4">
@@ -499,9 +708,20 @@ const CoachDashboard: React.FC = () => {
                             )}
                           </div>
 
-                          <div className="text-[10px] font-bold text-emerald-700 flex items-center gap-1 mt-1 uppercase tracking-tighter bg-emerald-50 w-fit px-1.5 rounded">
-                            <Trophy className="w-3 h-3" />
-                            {(a as any).competition || 'League Match'}
+                          {/* Competition badge + Appointed by */}
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
+                            <div className="text-[10px] font-bold text-emerald-700 flex items-center gap-1 uppercase tracking-tighter bg-emerald-50 w-fit px-1.5 py-0.5 rounded">
+                              <Trophy className="w-3 h-3" />
+                              {(a as any).competition || 'League Match'}
+                            </div>
+
+                            <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                              <User className="w-3 h-3 text-slate-400" />
+                              Appointed by:{' '}
+                              <span className="font-semibold text-slate-700">
+                                {appointerName}
+                              </span>
+                            </div>
                           </div>
                         </td>
 
@@ -598,7 +818,7 @@ const CoachDashboard: React.FC = () => {
                                     setCreateOpen(true);
                                   }}
                                   className={`hover:bg-white border border-transparent hover:border-gray-200
-                    ${a.status !== 'pending'
+                                    ${a.status !== 'pending'
                                       ? 'opacity-30 cursor-not-allowed'
                                       : ''}`}
                                   title={
@@ -665,9 +885,56 @@ const CoachDashboard: React.FC = () => {
       <AuditTrailDrawer appointmentId={auditId} onClose={() => setAuditId(null)} />
 
 
+      {/* ── Executive Overview Modal ── */}
+      <Dialog open={execViewOpen} onOpenChange={setExecViewOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col [&>button]:hidden">
+          <DialogHeader>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <DialogTitle className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <span className="bg-emerald-100 p-2 rounded-full">
+                    <ShieldCheck className="w-5 h-5 text-emerald-700" />
+                  </span>
+                  All Appointments
+                </DialogTitle>
+                <p className="text-xs text-slate-500 mt-1">
+                  Executive committee overview — every appointment across all coaches.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setExecViewOpen(false)}
+                aria-label="Close"
+                className="rounded-full p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </DialogHeader>
+
+          <div className="overflow-y-auto pr-1 -mr-1 flex-1">
+            {renderExecSection(
+              'This Week & Upcoming',
+              groupedAppointments.current,
+              'text-emerald-700'
+            )}
+            {renderExecSection(
+              'Last Week',
+              groupedAppointments.lastWeek,
+              'text-amber-700'
+            )}
+            {renderExecSection(
+              'Older',
+              groupedAppointments.older,
+              'text-slate-500'
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
 
       {/* ── Edit Modal ── */}
-      <Dialog open={!!editAppt} onOpenChange={v => !v && setEditAppt(null)}>
+      <Dialog open={!!editAppt && !createOpen} onOpenChange={v => !v && setEditAppt(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-lg font-bold text-slate-800">Edit Appointment</DialogTitle>
@@ -733,6 +1000,7 @@ const CoachDashboard: React.FC = () => {
         </DialogContent>
       </Dialog>
 
+      {/* ── Decline Reason Modal ── */}
       <Dialog open={!!reasonAppt} onOpenChange={(open) => !open && setReasonAppt(null)}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
@@ -782,7 +1050,6 @@ const CoachDashboard: React.FC = () => {
         onCreated={() => {
           setTeamRegistrationOpen(false);
         }}
-
       />
 
     </div>

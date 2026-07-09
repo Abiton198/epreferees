@@ -11,7 +11,7 @@ import type { UserRole } from '@/types';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { db, auth } from '@/lib/firebase';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, limit } from 'firebase/firestore';
 import SetupProfileModal from './SetupProfileModal';
 import RoleSelectionModal from './RoleSelectionModal';
 
@@ -76,6 +76,49 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
     navigate(`/dashboard/${role}`);
   };
 
+
+  /** Look for a legacy profile: by doc ID first, then by uid/email fields. */
+  const findLegacyProfile = async (uid: string, email: string | null) => {
+    const sources: { col: string; role: UserRole }[] = [
+      { col: 'coaches', role: 'coach' },
+      { col: 'referees', role: 'referee' },
+      { col: 'executives', role: 'executive' as UserRole },
+    ];
+
+    for (const src of sources) {
+      // 1. Doc keyed by UID
+      try {
+        const snap = await getDoc(doc(db, src.col, uid));
+        if (snap.exists()) {
+          return { ...snap.data(), role: src.role, sourceCollection: src.col };
+        }
+      } catch { /* denied or missing — keep looking */ }
+
+      // 2. Doc with uid stored as a field
+      try {
+        const byUid = await getDocs(query(
+          collection(db, src.col), where('uid', '==', uid), limit(1)
+        ));
+        if (!byUid.empty) {
+          return { ...byUid.docs[0].data(), role: src.role, sourceCollection: src.col };
+        }
+      } catch { /* keep looking */ }
+
+      // 3. Doc matched by email
+      if (email) {
+        try {
+          const byEmail = await getDocs(query(
+            collection(db, src.col), where('email', '==', email), limit(1)
+          ));
+          if (!byEmail.empty) {
+            return { ...byEmail.docs[0].data(), role: src.role, sourceCollection: src.col };
+          }
+        } catch { /* keep looking */ }
+      }
+    }
+    return null;
+  };
+
   const handleUserRouting = async (
     firebaseUser: any,
     isNewRegistration: boolean,
@@ -85,19 +128,44 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
 
     try {
       const userRef = doc(db, 'users', firebaseUser.uid);
-      const snap = await getDoc(userRef)
+      const snap = await getDoc(userRef);
 
       if (!snap.exists()) {
-        // ── GUARD: returning users should always have a doc ──────────────
-        // If this is a sign-in (not a fresh registration) and no doc exists,
-        // it's almost always a local/prod environment mismatch, NOT a real
-        // new user. Block here instead of silently creating a broken skeleton.
         if (!isNewRegistration) {
+          // ── LEGACY FALLBACK ─────────────────────────────────────────────
+          // Returning user with no users/{uid} doc: check the old per-role
+          // collections and migrate them forward before giving up.
+          const legacy: any = await findLegacyProfile(firebaseUser.uid, firebaseUser.email);
+
+          if (legacy) {
+            const migrated = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              full_name:
+                legacy.full_name || legacy.name ||
+                firebaseUser.displayName || '',
+              role: legacy.role,
+              isNewUser: false,
+              profileIncomplete: false,
+              status: 'active',
+              approved: true,
+              migratedFrom: legacy.sourceCollection,
+              createdAt: serverTimestamp(),
+            };
+
+            await setDoc(userRef, migrated);
+            goToDashboard(legacy.role);
+            return;
+          }
+
+          // Genuinely no profile anywhere — keep the guard.
           toast({
             title: 'Profile data not found',
-            description: 'Your account exists but your profile could not be loaded. This is usually a local vs production environment mismatch. Check your Firebase config.',
+            description:
+              'Your account exists but no profile document was found in users, coaches, referees, or executives. Check the Firebase console for this UID, or that the app is pointed at the right project.',
             variant: 'destructive',
           });
+          console.warn('[LoginModal] No profile found for UID:', firebaseUser.uid);
           return;
         }
 
@@ -105,11 +173,11 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
         const skeleton = {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
-          full_name: fullName || firebaseUser.displayName || "",
+          full_name: fullName || firebaseUser.displayName || '',
           role: intendedRole,
           isNewUser: true,
           profileIncomplete: true,
-          status: "active",
+          status: 'active',
           approved: true,
           createdAt: serverTimestamp(),
         };
