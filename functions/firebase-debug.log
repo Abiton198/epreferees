@@ -1,0 +1,32 @@
+[debug] [2026-07-15T16:41:07.151Z] ----------------------------------------------------------------------
+[debug] [2026-07-15T16:41:07.172Z] Command:       /home/travis/.nvm/versions/node/v24.12.0/bin/node /home/travis/.nvm/versions/node/v24.12.0/bin/firebase deploy --only functions
+[debug] [2026-07-15T16:41:07.173Z] CLI Version:   15.23.0
+[debug] [2026-07-15T16:41:07.173Z] Platform:      linux
+[debug] [2026-07-15T16:41:07.173Z] Node Version:  v24.12.0
+[debug] [2026-07-15T16:41:07.173Z] Detected Agent: unknown
+[debug] [2026-07-15T16:41:07.174Z] Time:          Wed Jul 15 2026 18:41:07 GMT+0200 (South Africa Standard Time)
+[debug] [2026-07-15T16:41:07.174Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-07-15T16:41:09.604Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-07-15T16:41:09.604Z] > authorizing via signed-in user (nextgenskills96@gmail.com)
+[debug] [2026-07-15T16:41:09.605Z] [iam] checking project refcentral-rugby for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2026-07-15T16:41:09.631Z] Checked if tokens are valid: true, expires at: 1784135033227
+[debug] [2026-07-15T16:41:09.631Z] Checked if tokens are valid: true, expires at: 1784135033227
+[debug] [2026-07-15T16:41:09.633Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/refcentral-rugby:testIamPermissions [none]
+[debug] [2026-07-15T16:41:09.634Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/refcentral-rugby:testIamPermissions  x-goog-user-project=refcentral-rugby
+[debug] [2026-07-15T16:41:09.634Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/refcentral-rugby:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-07-15T16:41:11.459Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/refcentral-rugby:testIamPermissions 200
+[debug] [2026-07-15T16:41:11.460Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/refcentral-rugby:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-07-15T16:41:11.460Z] Checked if tokens are valid: true, expires at: 1784135033227
+[debug] [2026-07-15T16:41:11.460Z] Checked if tokens are valid: true, expires at: 1784135033227
+[debug] [2026-07-15T16:41:11.461Z] >>> [apiv2][query] POST https://iam.googleapis.com/v1/projects/refcentral-rugby/serviceAccounts/refcentral-rugby@appspot.gserviceaccount.com:testIamPermissions [none]
+[debug] [2026-07-15T16:41:11.461Z] >>> [apiv2][body] POST https://iam.googleapis.com/v1/projects/refcentral-rugby/serviceAccounts/refcentral-rugby@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}
+[debug] [2026-07-15T16:41:13.394Z] <<< [apiv2][status] POST https://iam.googleapis.com/v1/projects/refcentral-rugby/serviceAccounts/refcentral-rugby@appspot.gserviceaccount.com:testIamPermissions 404
+[debug] [2026-07-15T16:41:13.394Z] <<< [apiv2][body] POST https://iam.googleapis.com/v1/projects/refcentral-rugby/serviceAccounts/refcentral-rugby@appspot.gserviceaccount.com:testIamPermissions {"error":{"code":404,"message":"Unknown service account","status":"NOT_FOUND"}}
+[debug] [2026-07-15T16:41:13.395Z] [functions] service account IAM check errored, deploy may fail: Request to https://iam.googleapis.com/v1/projects/refcentral-rugby/serviceAccounts/refcentral-rugby@appspot.gserviceaccount.com:testIamPermissions had HTTP Error: 404, Unknown service account {"name":"FirebaseError","children":[],"context":{"body":{"error":{"code":404,"message":"Unknown service account","status":"NOT_FOUND"}},"response":{"statusCode":404}},"exit":1,"message":"Request to https://iam.googleapis.com/v1/projects/refcentral-rugby/serviceAccounts/refcentral-rugby@appspot.gserviceaccount.com:testIamPermissions had HTTP Error: 404, Unknown service account","status":404}
+[info] 
+[info] === Deploying to 'refcentral-rugby'...
+[info] 
+[info] i  deploying functions 
+[info] Running command: npm --prefix "$RESOURCE_DIR" run lint
+[info] Running command: npm --prefix "$RESOURCE_DIR" run build
