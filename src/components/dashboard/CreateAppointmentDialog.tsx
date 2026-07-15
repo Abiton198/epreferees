@@ -218,10 +218,8 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
         // Teams
         homeTeamId: formData.teamAId || null,
         awayTeamId: formData.teamBId || null,
-
         homeTeam: homeName,
         awayTeam: awayName,
-
         matchTitle: `${homeName} vs ${awayName}`,
 
         // Match details
@@ -230,14 +228,18 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
         venue: formData.venue,
         notes: formData.notes || '',
 
+        // ── ADD THESE — Cloud Functions read these field names ────────────
+        date: formData.matchDate,       // ← Cloud Function reads appt.date
+        time: formData.matchTime,       // ← Cloud Function reads appt.time
+        role: formData.officialRole     // ← Cloud Function reads appt.role
+          || formData.refereeRole
+          || 'Referee',
+        // ─────────────────────────────────────────────────────────────────
+
         // Assignment
         refereeId: formData.refereeId || null,
-        refereeName: assignedRef
-          ? resolveName(assignedRef)
-          : null,
-
+        refereeName: assignedRef ? resolveName(assignedRef) : null,
         refereeEmail: assignedRef?.email || null,
-
         refereeRole: formData.refereeRole || 'referee',
         officialRole: formData.officialRole || 'Referee',
 
@@ -245,11 +247,16 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
         teamLevel: formData.teamLevel || 'main',
 
         coachId: profile?.id || user?.uid,
-        coachName:
-          profile?.firstName ||
-          profile?.displayName ||
-          user?.displayName ||
-          'Coach',
+        coachName: profile?.firstName
+          || profile?.displayName
+          || user?.displayName
+          || 'Coach',
+
+        // ── ADD THIS — so rejection emails reach the coach directly ───────
+        coachEmail: profile?.email
+          || user?.email
+          || null,
+        // ─────────────────────────────────────────────────────────────────
 
         updatedAt: serverTimestamp(),
       };
