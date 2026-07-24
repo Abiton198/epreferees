@@ -209,42 +209,49 @@ const CoachDashboard: React.FC = () => {
    *  - older   : anything earlier (or with no parseable date)
    */
   const groupedAppointments = useMemo(() => {
-    const now = new Date();
-    const mondayOffset = (now.getDay() + 6) % 7; // days elapsed since Monday
-    const startOfThisWeek = new Date(
-      now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset
-    );
-    const startOfLastWeek = new Date(startOfThisWeek);
-    startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
+  const now = new Date();
+  const mondayOffset = (now.getDay() + 6) % 7; // days elapsed since Monday
+  const startOfThisWeek = new Date(
+    now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset
+  );
+  const startOfLastWeek = new Date(startOfThisWeek);
+  startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
 
-    const current: Appointment[] = [];
-    const lastWeek: Appointment[] = [];
-    const older: Appointment[] = [];
+  const current: Appointment[] = [];
+  const lastWeek: Appointment[] = [];
+  const older: Appointment[] = [];
 
-    visibleAppointments.forEach((a) => {
-      const d = a.matchDate ? new Date(`${a.matchDate}T00:00:00`) : null;
-      const valid = d && !isNaN(d.getTime());
+  visibleAppointments.forEach((a) => {
+    const d = a.matchDate ? new Date(`${a.matchDate}T00:00:00`) : null;
+    const valid = d && !isNaN(d.getTime());
 
-      if (valid && d! >= startOfThisWeek) {
-        current.push(a);
-      } else if (valid && d! >= startOfLastWeek) {
-        lastWeek.push(a);
-      } else {
-        older.push(a);
-      }
-    });
+    if (valid && d! >= startOfThisWeek) {
+      current.push(a);
+    } else if (valid && d! >= startOfLastWeek) {
+      lastWeek.push(a);
+    } else {
+      older.push(a);
+    }
+  });
 
-    const byDateAsc = (x: Appointment, y: Appointment) =>
-      (x.matchDate || '').localeCompare(y.matchDate || '');
-    const byDateDesc = (x: Appointment, y: Appointment) =>
-      (y.matchDate || '').localeCompare(x.matchDate || '');
+  // Helper to construct a full ISO-like string for precise datetime comparison
+  const getDateTimeString = (a: Appointment) => {
+    const date = a.matchDate || '';
+    const time = a.matchTime || '00:00';
+    return `${date}T${time}`;
+  };
 
-    current.sort(byDateAsc);   // soonest fixtures first
-    lastWeek.sort(byDateDesc); // most recent first
-    older.sort(byDateDesc);
+  // Descending sort: latest (newest date/time) comes first
+  const byDateTimeDesc = (x: Appointment, y: Appointment) =>
+    getDateTimeString(y).localeCompare(getDateTimeString(x));
 
-    return { current, lastWeek, older };
-  }, [visibleAppointments]);
+  // Sort all groups from latest to oldest
+  current.sort(byDateTimeDesc);
+  lastWeek.sort(byDateTimeDesc);
+  older.sort(byDateTimeDesc);
+
+  return { current, lastWeek, older };
+}, [visibleAppointments]);
 
 
   // ── Helpers ───────────────────────────────────────────────────────────────
