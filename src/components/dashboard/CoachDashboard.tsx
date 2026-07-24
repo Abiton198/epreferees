@@ -257,10 +257,17 @@ const CoachDashboard: React.FC = () => {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   /** Resolve the name of the coach who created (appointed) this fixture. */
-  const getAppointerName = (a: any): string =>
-    a.coachName ||
-    a.auditTrail?.find((e: any) => e.action === 'created')?.byName ||
-    'Unknown';
+  // const getAppointerName = (a: any): string =>
+  //   a.coachName ||
+  //   a.auditTrail?.find((e: any) => e.action === 'created')?.byName ||
+  //   'Appointment Committee';
+// const getAppointerName = (_a?: any): string => 'Appointment Committee';
+const getAppointerName = (a: any): string => {
+  const fullName = a.coachName || a.auditTrail?.find((e: any) => e.action === 'created')?.byName;
+  const firstName = fullName ? fullName.trim().split(' ')[0] : null;
+
+  return firstName ? `Appointments Committee (${firstName})` : 'Appointment Committee';
+};
 
   const getStatusTimestamp = (appt: any) => {
     if (!appt.auditTrail || appt.status === 'pending') return null;
