@@ -549,24 +549,71 @@ const CreateAppointmentDialog: React.FC<Props> = ({ open, onOpenChange, onCreate
 
           {/* STEP 3: Logistics */}
           {step === 3 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Date</Label>
-                  <Input type="date" value={formData.matchDate} onChange={(e) => updateField('matchDate', e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Time</Label>
-                  <Input type="time" value={formData.matchTime} onChange={(e) => updateField('matchTime', e.target.value)} />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Venue / Ground</Label>
-                <Input value={formData.venue} onChange={(e) => updateField('venue', e.target.value)} placeholder="Where is the match?" />
-              </div>
-            </div>
-          )}
+  <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+    <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-2">
+        <Label>Date</Label>
+        <Input 
+          type="date" 
+          value={formData.matchDate} 
+          onChange={(e) => updateField('matchDate', e.target.value)} 
+        />
+      </div>
 
+      {/* 24-Hour Time Selector */}
+      <div className="space-y-2">
+        <Label>Time (24hr)</Label>
+        <div className="flex items-center gap-2">
+          {/* Hours (00 - 23) */}
+          <select
+            value={formData.matchTime ? formData.matchTime.split(':')[0] : '14'}
+            onChange={(e) => {
+              const mins = formData.matchTime ? formData.matchTime.split(':')[1] || '00' : '00';
+              updateField('matchTime', `${e.target.value}:${mins}`);
+            }}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          >
+            {Array.from({ length: 24 }, (_, i) => {
+              const hour = i.toString().padStart(2, '0');
+              return (
+                <option key={hour} value={hour}>
+                  {hour}
+                </option>
+              );
+            })}
+          </select>
+
+          <span className="font-bold text-slate-500">:</span>
+
+          {/* Minutes (00 - 55 in 5-min intervals) */}
+          <select
+            value={formData.matchTime ? formData.matchTime.split(':')[1] || '00' : '00'}
+            onChange={(e) => {
+              const hrs = formData.matchTime ? formData.matchTime.split(':')[0] || '14' : '14';
+              updateField('matchTime', `${hrs}:${e.target.value}`);
+            }}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          >
+            {['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'].map((min) => (
+              <option key={min} value={min}>
+                {min}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div className="space-y-2">
+      <Label>Venue / Ground</Label>
+      <Input 
+        value={formData.venue} 
+        onChange={(e) => updateField('venue', e.target.value)} 
+        placeholder="Where is the match?" 
+      />
+    </div>
+  </div>
+)}
           {/* STEP 4: Assignment */}
           {step === 4 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
