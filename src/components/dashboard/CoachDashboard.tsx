@@ -209,49 +209,49 @@ const CoachDashboard: React.FC = () => {
    *  - older   : anything earlier (or with no parseable date)
    */
   const groupedAppointments = useMemo(() => {
-  const now = new Date();
-  const mondayOffset = (now.getDay() + 6) % 7; // days elapsed since Monday
-  const startOfThisWeek = new Date(
-    now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset
-  );
-  const startOfLastWeek = new Date(startOfThisWeek);
-  startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
+    const now = new Date();
+    const mondayOffset = (now.getDay() + 6) % 7; // days elapsed since Monday
+    const startOfThisWeek = new Date(
+      now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset
+    );
+    const startOfLastWeek = new Date(startOfThisWeek);
+    startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
 
-  const current: Appointment[] = [];
-  const lastWeek: Appointment[] = [];
-  const older: Appointment[] = [];
+    const current: Appointment[] = [];
+    const lastWeek: Appointment[] = [];
+    const older: Appointment[] = [];
 
-  visibleAppointments.forEach((a) => {
-    const d = a.matchDate ? new Date(`${a.matchDate}T00:00:00`) : null;
-    const valid = d && !isNaN(d.getTime());
+    visibleAppointments.forEach((a) => {
+      const d = a.matchDate ? new Date(`${a.matchDate}T00:00:00`) : null;
+      const valid = d && !isNaN(d.getTime());
 
-    if (valid && d! >= startOfThisWeek) {
-      current.push(a);
-    } else if (valid && d! >= startOfLastWeek) {
-      lastWeek.push(a);
-    } else {
-      older.push(a);
-    }
-  });
+      if (valid && d! >= startOfThisWeek) {
+        current.push(a);
+      } else if (valid && d! >= startOfLastWeek) {
+        lastWeek.push(a);
+      } else {
+        older.push(a);
+      }
+    });
 
-  // Helper to construct a full ISO-like string for precise datetime comparison
-  const getDateTimeString = (a: Appointment) => {
-    const date = a.matchDate || '';
-    const time = a.matchTime || '00:00';
-    return `${date}T${time}`;
-  };
+    // Helper to construct a full ISO-like string for precise datetime comparison
+    const getDateTimeString = (a: Appointment) => {
+      const date = a.matchDate || '';
+      const time = a.matchTime || '00:00';
+      return `${date}T${time}`;
+    };
 
-  // Descending sort: latest (newest date/time) comes first
-  const byDateTimeDesc = (x: Appointment, y: Appointment) =>
-    getDateTimeString(y).localeCompare(getDateTimeString(x));
+    // Descending sort: latest (newest date/time) comes first
+    const byDateTimeDesc = (x: Appointment, y: Appointment) =>
+      getDateTimeString(y).localeCompare(getDateTimeString(x));
 
-  // Sort all groups from latest to oldest
-  current.sort(byDateTimeDesc);
-  lastWeek.sort(byDateTimeDesc);
-  older.sort(byDateTimeDesc);
+    // Sort all groups from latest to oldest
+    current.sort(byDateTimeDesc);
+    lastWeek.sort(byDateTimeDesc);
+    older.sort(byDateTimeDesc);
 
-  return { current, lastWeek, older };
-}, [visibleAppointments]);
+    return { current, lastWeek, older };
+  }, [visibleAppointments]);
 
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -261,13 +261,13 @@ const CoachDashboard: React.FC = () => {
   //   a.coachName ||
   //   a.auditTrail?.find((e: any) => e.action === 'created')?.byName ||
   //   'Appointment Committee';
-// const getAppointerName = (_a?: any): string => 'Appointment Committee';
-const getAppointerName = (a: any): string => {
-  const fullName = a.coachName || a.auditTrail?.find((e: any) => e.action === 'created')?.byName;
-  const firstName = fullName ? fullName.trim().split(' ')[0] : null;
+  const getAppointerName = (_a?: any): string => 'Appointment Committee';
+  // const getAppointerName = (a: any): string => {
+  //   const fullName = a.coachName || a.auditTrail?.find((e: any) => e.action === 'created')?.byName;
+  //   const firstName = fullName ? fullName.trim().split(' ')[0] : null;
 
-  return firstName ? `Appointments Committee (${firstName})` : 'Appointment Committee';
-};
+  //   return firstName ? `Appointments Committee (${firstName})` : 'Appointment Committee';
+  // };
 
   const getStatusTimestamp = (appt: any) => {
     if (!appt.auditTrail || appt.status === 'pending') return null;
