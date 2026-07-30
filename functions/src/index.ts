@@ -81,7 +81,7 @@ function tomorrow(): Date {
 
 async function sendOrQueue(
   resend: Resend,
-  payload: { from: string; to: string; subject: string; html: string },
+  payload: { from: string; to: string | string[]; subject: string; html: string },
 ): Promise<void> {
   try {
     await resend.emails.send(payload);
@@ -226,9 +226,21 @@ async function flushCoachSummary(
       id: d.id, ...(d.data() as QueuedNotification),
     }));
 
+    // Standardize additional summary emails
+    const additionalEmails = ['ctobias@mandelametro.gov.za', 'eprrschairperson@gmail.com', 'rodneybonaparte04@gmail.com'];
+    const normalizedCoach = coachEmail?.trim().toLowerCase();
+
+    // Only keep extra emails that DO NOT match the coach's email
+    const extraRecipients = additionalEmails.filter(
+      email => email.trim().toLowerCase() !== normalizedCoach
+    );
+
+    // Final list: primary coach email + non-duplicate extra emails
+    const RECIPIENTS = [coachEmail, ...extraRecipients].filter(Boolean);
+
     await sendOrQueue(resend, {
       from: FROM_ADDRESS,
-      to: coachEmail,
+      to: RECIPIENTS.join(', '), // Or RECIPIENTS if sendOrQueue accepts string[]
       subject: `📊 Appointment Summary — ${notifications.length} updates`,
       html: summaryEmailHtml({ coachName, notifications }),
     });
@@ -238,10 +250,8 @@ async function flushCoachSummary(
     await batch.commit();
 
     await releaseFlushLock(coachId, /* resetCount */ true);
-    console.log(`[Summary] Sent ${notifications.length} items to ${coachEmail}`);
+    console.log(`[Summary] Sent ${notifications.length} items to ${RECIPIENTS.join(', ')}`);
   } catch (err) {
-    // Release the lock so the next event or daily cron can retry; leave
-    // pendingCount as-is since the underlying notifications are still unsent.
     await releaseFlushLock(coachId, /* resetCount */ false);
     console.error(`[Summary] Flush failed for ${coachId}:`, err);
     throw err;
