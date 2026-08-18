@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { TeamRegistrationForm } from './TeamRegistrationForm';
+import { RefereeMatchSummaries } from './RefereeMatchSummaries';
 
 
 const CoachDashboard: React.FC = () => {
@@ -68,6 +69,9 @@ const CoachDashboard: React.FC = () => {
 
   // Team Registration
   const [teamRegistrationOpen, setTeamRegistrationOpen] = useState(false);
+
+  // referee match summaries
+  const [refereeSummaryOpen, setRefereeSummaryOpen] = useState(false);
 
 
   // ── Real-time listeners ──────────────────────────────────────────────────
@@ -531,38 +535,65 @@ const CoachDashboard: React.FC = () => {
       <DashboardHeader />
       <main className="max-w-7xl mx-auto px-4 md:px-8 py-8">
 
-        {/* Header */}
-        <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 w-full mb-6">
+          {/* Header Title Section */}
           <div>
-            <h1 className="text-4xl font-black text-gray-900 tracking-tight">Coach Dashboard</h1>
-            <p className="text-gray-600 mt-1 italic">
-              Logged in as <span className="font-bold text-[#006747]">
+            <h1 className="text-2xl sm:text-4xl font-black text-gray-900 tracking-tight">
+              Coach Dashboard
+            </h1>
+            <p className="text-xs sm:text-sm text-gray-600 mt-1 italic flex flex-wrap items-center gap-1.5">
+              <span>Logged in as</span>
+              <span className="font-bold text-[#006747]">
                 {user?.displayName || user?.email || 'Coach'}
               </span>
               {isExecutive && (
-                <span className="not-italic ml-2 inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full align-middle">
+                <span className="not-italic inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
                   <ShieldCheck className="w-3 h-3" />
-                  Executive Committee
+                  Executive
                 </span>
               )}
             </p>
           </div>
-          <div className="flex gap-2 print:hidden">
+
+          {/* Action Buttons Grid - Mobile Responsive */}
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2 w-full sm:w-auto print:hidden">
             {isExecutive && (
-              <Button
-                variant="outline"
-                onClick={() => setExecViewOpen(true)}
-                className="shadow-sm border-emerald-200 text-emerald-800 hover:bg-emerald-50"
-              >
-                <Eye className="w-4 h-4 mr-2" /> All Appointments
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => setRefereeSummaryOpen(true)}
+                  className="w-full sm:w-auto justify-center text-xs sm:text-sm shadow-sm border-emerald-200 text-emerald-800 hover:bg-emerald-50 bg-emerald-50/50 h-10 px-3 sm:px-4"
+                >
+                  <ScrollText className="w-4 h-4 mr-1.5 sm:mr-2 text-emerald-600 shrink-0" />
+                  <span className="truncate">Referee Summaries</span>
+                </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={() => setExecViewOpen(true)}
+                  className="w-full sm:w-auto justify-center text-xs sm:text-sm shadow-sm border-emerald-200 text-emerald-800 hover:bg-emerald-50 h-10 px-3 sm:px-4"
+                >
+                  <Eye className="w-4 h-4 mr-1.5 sm:mr-2 shrink-0" />
+                  <span className="truncate">All Appointments</span>
+                </Button>
+              </>
             )}
-            <Button variant="outline" onClick={() => window.print()} className="shadow-sm">
-              <Printer className="w-4 h-4 mr-2" /> Report
+
+            <Button
+              variant="outline"
+              onClick={() => window.print()}
+              className="w-full sm:w-auto justify-center text-xs sm:text-sm shadow-sm border-gray-200 h-10 px-3 sm:px-4"
+            >
+              <Printer className="w-4 h-4 mr-1.5 sm:mr-2 text-gray-500 shrink-0" />
+              <span className="truncate">Report</span>
             </Button>
-            <Button onClick={() => setCreateOpen(true)}
-              className="bg-[#006747] hover:bg-[#004d35] shadow-md transition-all active:scale-95">
-              <Plus className="w-4 h-4 mr-2" /> New Appointment
+
+            <Button
+              onClick={() => setCreateOpen(true)}
+              className="col-span-2 sm:col-span-1 w-full sm:w-auto justify-center text-xs sm:text-sm bg-[#006747] hover:bg-[#004d35] text-white font-bold shadow-md transition-all active:scale-95 h-10 px-4"
+            >
+              <Plus className="w-4 h-4 mr-1.5 sm:mr-2 shrink-0" />
+              <span>New Appointment</span>
             </Button>
           </div>
         </div>
@@ -876,6 +907,7 @@ const CoachDashboard: React.FC = () => {
             </div>
           )}
         </div>
+
       </main>
 
       {/* Create dialog */}
@@ -925,6 +957,32 @@ const CoachDashboard: React.FC = () => {
               </button>
             </div>
           </DialogHeader>
+
+
+          {/* Referee Match Summaries Dialog */}
+          <Dialog open={refereeSummaryOpen} onOpenChange={setRefereeSummaryOpen}>
+            <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto p-0">
+              <DialogHeader className="p-6 pb-0">
+                <DialogTitle className="text-2xl font-black text-slate-900">
+                  Referee Match Summaries
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="p-6">
+                <RefereeMatchSummaries
+                  appointments={appts}
+                  referees={referees}
+                />
+              </div>
+
+              <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200">
+                <Button variant="outline" onClick={() => setRefereeSummaryOpen(false)}>
+                  Close Summaries
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
 
           <div className="overflow-y-auto pr-1 -mr-1 flex-1">
             {renderExecSection(

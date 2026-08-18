@@ -334,23 +334,81 @@ export const onAppointmentUpdated = onDocumentUpdated(
       return;
     }
 
-    const { shouldSend } = await queueCoachNotification(
-      coachId, coachEmail, coachName,
-      {
-        type: isAccepted ? 'accepted' : 'rejected',
-        refereeName,
-        matchInfo: `${after.homeTeam || 'TBD'} vs ${after.awayTeam || 'TBD'}`,
-        date: formatDate(after.date || after.matchDate || ''),
-        time: formatTime(after.time || after.matchTime || ''),
-        venue: after.venue || 'TBD',
-        reason: isRejected
-          ? (after.rejectionReason || after.declineReason || 'No reason provided')
-          : null,
-      },
-    );
+    const matchInfo = `${after.homeTeam || 'TBD'} vs ${after.awayTeam || 'TBD'}`;
+    const date = formatDate(after.date || after.matchDate || '');
+    const time = formatTime(after.time || after.matchTime || '');
+    const venue = after.venue || 'TBD';
 
-    if (shouldSend) {
-      await flushCoachSummary(resend, coachId, coachEmail, coachName);
+    // 🔴 IMMEDIATE NOTIFICATION FOR REJECTIONS
+    if (isRejected) {
+      const reason = after.rejectionReason || after.declineReason || 'No reason provided';
+
+      // 1. Send immediate urgent email directly to coach & extra summary recipients
+      const additionalEmails = ['ctobias@mandelametro.gov.za', 'eprrschairperson@gmail.com'];
+      const normalizedCoach = coachEmail.trim().toLowerCase();
+      const extraRecipients = additionalEmails.filter(
+        email => email.trim().toLowerCase() !== normalizedCoach
+      );
+      const RECIPIENTS = [coachEmail, ...extraRecipients].filter(Boolean);
+
+      await sendOrQueue(resend, {
+        from: FROM_ADDRESS,
+        to: RECIPIENTS,
+        subject: `🚨 URGENT: Referee Declined — ${matchInfo}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+            <h2 style="color: #dc2626; margin-top: 0;">🚨 Referee Appointment Declined</h2>
+            <p>Hi <strong>${coachName}</strong>,</p>
+            <p><strong>${refereeName}</strong> has declined the appointment for your upcoming fixture. Please review the details below and reassign another referee immediately.</p>
+            
+            <div style="background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 12px 16px; margin: 20px 0; border-radius: 4px;">
+              <p style="margin: 4px 0;"><strong>Match:</strong> ${matchInfo}</p>
+              <p style="margin: 4px 0;"><strong>Date:</strong> ${date} at ${time}</p>
+              <p style="margin: 4px 0;"><strong>Venue:</strong> ${venue}</p>
+              <p style="margin: 4px 0; color: #991b1b;"><strong>Reason Given:</strong> ${reason}</p>
+            </div>
+            
+            <p>Log in to the portal now to select a replacement referee.</p>
+          </div>
+        `,
+      });
+
+      // 2. Log in the queue as already sent (so it appears in history without double-emailing)
+      await db.collection('coachNotificationQueue').add({
+        coachId,
+        type: 'rejected',
+        refereeName,
+        matchInfo,
+        date,
+        time,
+        venue,
+        reason,
+        sent: true,
+        createdAt: new Date(),
+      });
+
+      console.log(`[Urgent] Rejection notification sent immediately to ${RECIPIENTS.join(', ')}`);
+      return;
+    }
+
+    // 🟢 ACCEPTED APPOINTMENTS (Follow standard queue/summary logic)
+    if (isAccepted) {
+      const { shouldSend } = await queueCoachNotification(
+        coachId, coachEmail, coachName,
+        {
+          type: 'accepted',
+          refereeName,
+          matchInfo,
+          date,
+          time,
+          venue,
+          reason: null,
+        },
+      );
+
+      if (shouldSend) {
+        await flushCoachSummary(resend, coachId, coachEmail, coachName);
+      }
     }
   }
 );
