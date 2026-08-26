@@ -317,6 +317,42 @@ export const onAppointmentUpdated = onDocumentUpdated(
     const before = event.data?.before.data();
     const after = event.data?.after.data();
     if (!before || !after) return;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // NEW CASE: Referee newly assigned via Edit (pending_assignment -> pending)
+    // ─────────────────────────────────────────────────────────────────────────
+    const isNewlyAssigned = (!before.refereeId && after.refereeId) ||
+      (before.status === 'pending_assignment' && after.status === 'pending');
+
+    if (isNewlyAssigned && after.refereeId) {
+      const resend = new Resend(RESEND_KEY.value());
+      const refereeEmail = after.refereeEmail ?? await getUserEmail(after.refereeId);
+      const refereeName = after.refereeName ?? await getUserName(after.refereeId);
+
+      if (refereeEmail) {
+        await sendOrQueue(resend, {
+          from: FROM_ADDRESS,
+          to: refereeEmail,
+          subject: `📋 New Match Appointment — ${after.homeTeam || 'TBD'} vs ${after.awayTeam || 'TBD'}`,
+          html: appointmentEmailHtml({
+            refereeName,
+            coachName: after.coachName || 'Your coach',
+            homeTeam: after.homeTeam || 'TBD',
+            awayTeam: after.awayTeam || 'TBD',
+            venue: after.venue || 'TBD',
+            date: formatDate(after.date || after.matchDate || ''),
+            time: formatTime(after.time || after.matchTime || ''),
+            role: (after.role || after.officialRole || 'Referee')
+              .replace(/^\w/, (c: string) => c.toUpperCase()),
+            portalUrl: PORTAL_URL,
+          }),
+        });
+
+        console.log('[Email -> Newly Assigned Referee]', refereeEmail);
+      }
+      return; // Handled newly assigned case
+    }
+
     if (before.status === after.status) return;
 
     const isAccepted = after.status === 'accepted' && before.status !== 'accepted';

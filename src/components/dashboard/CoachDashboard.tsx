@@ -32,7 +32,6 @@ import { toast } from '@/components/ui/use-toast';
 import { TeamRegistrationForm } from './TeamRegistrationForm';
 import { RefereeMatchSummaries } from './RefereeMatchSummaries';
 
-
 const CoachDashboard: React.FC = () => {
   const { user } = useAuth() as any;
 
@@ -70,14 +69,13 @@ const CoachDashboard: React.FC = () => {
   // Team Registration
   const [teamRegistrationOpen, setTeamRegistrationOpen] = useState(false);
 
-  // referee match summaries
+  // Referee match summaries
   const [refereeSummaryOpen, setRefereeSummaryOpen] = useState(false);
-
+  const [editRefereeId, setEditRefereeId] = useState('');
 
   // ── Real-time listeners ──────────────────────────────────────────────────
 
-  // 1. Own profile — determines whether this coach is an executive
-  //    committee member (isExecutive flag set via console/Admin SDK only).
+  // 1. Own profile — determines whether this coach is an executive committee member
   useEffect(() => {
     const uid = user?.uid;
     if (!uid) return;
@@ -89,7 +87,7 @@ const CoachDashboard: React.FC = () => {
       },
       (err) => {
         console.error("Profile listener error:", err);
-        setIsExecutive(false); // fail closed to own-appointments scope
+        setIsExecutive(false);
       }
     );
 
@@ -97,7 +95,6 @@ const CoachDashboard: React.FC = () => {
   }, [user?.uid]);
 
   // 2. Appointments — waits until scope is known.
-  //    Executives get the UNFILTERED collection; regular coaches only theirs.
   useEffect(() => {
     const uid = user?.uid;
     if (!uid || isExecutive === null) return;
@@ -136,7 +133,6 @@ const CoachDashboard: React.FC = () => {
     const uid = user?.uid;
     if (!uid) return;
 
-    // Referees (from 'users' collection)
     const unsubRefs = onSnapshot(
       query(collection(db, "users"), where("role", "==", "referee")),
       (snapshot) => {
@@ -146,7 +142,6 @@ const CoachDashboard: React.FC = () => {
           map[d.id] = {
             ...data,
             id: d.id,
-            // Map full_name to a standard property for the UI to read
             full_name: data.full_name || data.displayName || 'Unnamed Referee'
           };
         });
@@ -154,7 +149,6 @@ const CoachDashboard: React.FC = () => {
       }
     );
 
-    // Teams
     const unsubTeams = onSnapshot(collection(db, "teams"), (snapshot) => {
       setTeams(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
@@ -164,7 +158,6 @@ const CoachDashboard: React.FC = () => {
       unsubTeams();
     };
   }, [user?.uid]);
-
 
   // ── Computed values ───────────────────────────────────────────────────────
   const visibleAppointments = useMemo(
@@ -184,37 +177,26 @@ const CoachDashboard: React.FC = () => {
 
   const stats = useMemo(() => ({
     total: appts.filter(a => !a.deleted).length,
-
     pending: appts.filter(
-      a => a.status === 'pending' && !a.deleted
+      a => (a.status === 'pending' || a.status === 'pending_assignment') && !a.deleted
     ).length,
-
     accepted: appts.filter(
       a => a.status === 'accepted' && !a.deleted
     ).length,
-
     rejected: appts.filter(
       a => a.status === 'rejected' && !a.deleted
     ).length,
-
     cancelled: appts.filter(
       (a: any) => a.deleted
     ).length,
-
   }), [appts]);
 
   const venues = useMemo(() =>
     [...new Set(teams.map(t => t.homeGround))].filter(Boolean), [teams]);
 
-  /**
-   * Executive overview grouping:
-   *  - current : match date in the current week (Mon–Sun) or in the future
-   *  - lastWeek: match date within the previous week
-   *  - older   : anything earlier (or with no parseable date)
-   */
   const groupedAppointments = useMemo(() => {
     const now = new Date();
-    const mondayOffset = (now.getDay() + 6) % 7; // days elapsed since Monday
+    const mondayOffset = (now.getDay() + 6) % 7;
     const startOfThisWeek = new Date(
       now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset
     );
@@ -224,6 +206,7 @@ const CoachDashboard: React.FC = () => {
     const current: Appointment[] = [];
     const lastWeek: Appointment[] = [];
     const older: Appointment[] = [];
+
 
     visibleAppointments.forEach((a) => {
       const d = a.matchDate ? new Date(`${a.matchDate}T00:00:00`) : null;
@@ -238,18 +221,15 @@ const CoachDashboard: React.FC = () => {
       }
     });
 
-    // Helper to construct a full ISO-like string for precise datetime comparison
     const getDateTimeString = (a: Appointment) => {
       const date = a.matchDate || '';
       const time = a.matchTime || '00:00';
       return `${date}T${time}`;
     };
 
-    // Descending sort: latest (newest date/time) comes first
     const byDateTimeDesc = (x: Appointment, y: Appointment) =>
       getDateTimeString(y).localeCompare(getDateTimeString(x));
 
-    // Sort all groups from latest to oldest
     current.sort(byDateTimeDesc);
     lastWeek.sort(byDateTimeDesc);
     older.sort(byDateTimeDesc);
@@ -257,21 +237,8 @@ const CoachDashboard: React.FC = () => {
     return { current, lastWeek, older };
   }, [visibleAppointments]);
 
-
   // ── Helpers ───────────────────────────────────────────────────────────────
-
-  /** Resolve the name of the coach who created (appointed) this fixture. */
-  // const getAppointerName = (a: any): string =>
-  //   a.coachName ||
-  //   a.auditTrail?.find((e: any) => e.action === 'created')?.byName ||
-  //   'Appointment Committee';
   const getAppointerName = (_a?: any): string => 'Appointment Committee';
-  // const getAppointerName = (a: any): string => {
-  //   const fullName = a.coachName || a.auditTrail?.find((e: any) => e.action === 'created')?.byName;
-  //   const firstName = fullName ? fullName.trim().split(' ')[0] : null;
-
-  //   return firstName ? `Appointments Committee (${firstName})` : 'Appointment Committee';
-  // };
 
   const getStatusTimestamp = (appt: any) => {
     if (!appt.auditTrail || appt.status === 'pending') return null;
@@ -291,7 +258,6 @@ const CoachDashboard: React.FC = () => {
     });
   };
 
-
   // ── Delete ────────────────────────────────────────────────────────────────
   const handleDeleteClick = (a: Appointment) => {
     setDeleteId(a.id);
@@ -299,22 +265,17 @@ const CoachDashboard: React.FC = () => {
 
   const handleConfirmDelete = async () => {
     if (!deleteId) return;
-
     setDeleteLoading(true);
 
     try {
       const appointment = appts.find(a => a.id === deleteId);
-
-      if (!appointment) {
-        throw new Error("Appointment not found");
-      }
+      if (!appointment) throw new Error("Appointment not found");
 
       await updateDoc(doc(db, "appointments", deleteId), {
         deleted: true,
         deletedAt: serverTimestamp(),
         deletedBy: user?.uid || "coach",
         previousStatus: appointment.status,
-
         auditTrail: [
           ...(appointment.auditTrail || []),
           {
@@ -340,10 +301,8 @@ const CoachDashboard: React.FC = () => {
       });
 
       setDeleteId(null);
-
     } catch (error: any) {
       console.error("Delete error:", error);
-
       toast({
         title: "Error",
         description: error.message,
@@ -355,9 +314,8 @@ const CoachDashboard: React.FC = () => {
   };
 
   // ── Edit ──────────────────────────────────────────────────────────────────
-
   const openEditModal = (a: Appointment) => {
-    if (a.status !== 'pending') {
+    if (a.status !== 'pending' && a.status !== 'pending_assignment') {
       toast({
         title: "Cannot edit",
         description: "Only pending appointments can be edited.",
@@ -365,11 +323,13 @@ const CoachDashboard: React.FC = () => {
       });
       return;
     }
+
     setEditAppt(a);
+    setEditNotes(a.notes || '');
     setEditDate(a.matchDate || '');
     setEditTime(a.matchTime || '');
     setEditVenue(a.venue || '');
-    setEditNotes((a as any).notes || '');
+    setEditRefereeId(a.refereeId || ''); // <-- Set initial referee ID
   };
 
   const handleEditSave = async () => {
@@ -377,69 +337,80 @@ const CoachDashboard: React.FC = () => {
     setEditLoading(true);
 
     try {
-      // 1. Ensure we have a valid reference
       const docRef = doc(db, "appointments", editAppt.id);
 
-      // Resolve the appointer's display name reliably
-      const resolveByName = (): string => {
-        // 1. If the editor is the coach who owns this appointment, use the stored coachName
-        if (user?.uid && user.uid === (editAppt as any).coachId && (editAppt as any).coachName) {
-          return (editAppt as any).coachName;
-        }
-        // 2. Look up their name from a previous audit entry by the same uid
-        const prevEntry = ((editAppt as any).auditTrail || []).find(
-          (e: any) => e.by === user?.uid && e.byName
-        );
-        if (prevEntry) return prevEntry.byName;
-        // 3. Fall back to Auth profile, then email
-        return user?.displayName || user?.email || 'Coach';
-      };
+      const effectiveRefereeId =
+        editRefereeId && editRefereeId !== "unassigned" ? editRefereeId : null;
 
-      // 2. Create a clean update object (avoiding undefined values)
-      const updateData = {
+      const newStatus = effectiveRefereeId ? "pending" : "pending_assignment";
+      const selectedReferee = effectiveRefereeId ? referees[effectiveRefereeId] : null;
+      const refereeName = selectedReferee?.full_name || "";
+      const refereeEmail = selectedReferee?.email || "";
+
+      // Track if a new referee was assigned or swapped
+      const isNewlyAssigned = Boolean(
+        effectiveRefereeId && effectiveRefereeId !== editAppt.refereeId
+      );
+
+      const updateData: Record<string, any> = {
         matchDate: editDate || "",
         matchTime: editTime || "",
         venue: editVenue || "",
         notes: editNotes || "",
+        date: editDate || "",
+        time: editTime || "",
+        refereeId: effectiveRefereeId,
+        refereeName: refereeName,
+        refereeEmail: refereeEmail,
+        status: newStatus,
         updatedAt: serverTimestamp(),
-
-        // 3. Audit Trail Guard: Ensure user.uid and existing trail are valid
         auditTrail: [
           ...((editAppt as any).auditTrail || []),
           {
-            action: 'edited',
-            by: user?.uid || 'unknown_id',
-            byName: resolveByName(),
-            byRole: 'coach',
+            action: isNewlyAssigned ? "assigned_referee" : "edited",
+            by: user?.uid || "unknown_id",
+            byName: user?.displayName || user?.email || "Coach",
+            byRole: "coach",
             timestamp: new Date().toISOString(),
             details: {
-              date: editDate || "",
-              time: editTime || "",
-              venue: editVenue || "",
-              notes: editNotes || "",
+              oldDate: (editAppt as any).matchDate || "",
+              newDate: editDate || "",
+              oldTime: (editAppt as any).matchTime || "",
+              newTime: editTime || "",
+              oldVenue: (editAppt as any).venue || "",
+              newVenue: editVenue || "",
+              oldRefereeId: editAppt.refereeId || "",
+              newRefereeId: effectiveRefereeId || "",
+              statusKept: newStatus,
             },
           },
-        ]
+        ],
       };
 
+      // Save to Firestore — triggers onAppointmentUpdated in Cloud Functions automatically
       await updateDoc(docRef, updateData);
 
-      toast({ title: "Appointment updated" });
+      toast({
+        title: effectiveRefereeId ? "Referee Assigned" : "Fixture Updated",
+        description: effectiveRefereeId
+          ? "Referee has been assigned. Email notification dispatched automatically."
+          : "Fixture details saved.",
+      });
+
       setEditAppt(null);
     } catch (err: any) {
       console.error("Firestore Update Error:", err);
       toast({
         title: "Update failed",
         description: err.message,
-        variant: "destructive"
+        variant: "destructive",
       });
     } finally {
       setEditLoading(false);
     }
   };
 
-
-  // ── Sub-render: one appointment row inside the executive overview ────────
+  // ── Executive Row Renderers ───────────────────────────────────────────────
   const renderExecRow = (a: Appointment) => (
     <div
       key={a.id}
@@ -527,16 +498,13 @@ const CoachDashboard: React.FC = () => {
     </div>
   );
 
-
-  // ── Render ────────────────────────────────────────────────────────────────
-
+  // ── Render Main Component ──────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50">
       <DashboardHeader />
       <main className="max-w-7xl mx-auto px-4 md:px-8 py-8">
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 w-full mb-6">
-          {/* Header Title Section */}
           <div>
             <h1 className="text-2xl sm:text-4xl font-black text-gray-900 tracking-tight">
               Coach Dashboard
@@ -555,7 +523,6 @@ const CoachDashboard: React.FC = () => {
             </p>
           </div>
 
-          {/* Action Buttons Grid - Mobile Responsive */}
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2 w-full sm:w-auto print:hidden">
             {isExecutive && (
               <>
@@ -601,46 +568,11 @@ const CoachDashboard: React.FC = () => {
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
           {[
-            {
-              label: 'Total',
-              value: stats.total,
-              icon: Calendar,
-              color: 'text-gray-700',
-              bg: 'bg-gray-100'
-            },
-
-            {
-              label: 'Pending',
-              value: stats.pending,
-              icon: Clock,
-              color: 'text-amber-700',
-              bg: 'bg-amber-100'
-            },
-
-            {
-              label: 'Accepted',
-              value: stats.accepted,
-              icon: CheckCircle2,
-              color: 'text-emerald-700',
-              bg: 'bg-emerald-100'
-            },
-
-            {
-              label: 'Rejected',
-              value: stats.rejected,
-              icon: XCircle,
-              color: 'text-rose-700',
-              bg: 'bg-rose-100'
-            },
-
-            {
-              label: 'Cancelled',
-              value: stats.cancelled,
-              icon: Trash2,
-              color: 'text-red-700',
-              bg: 'bg-red-100'
-            },
-
+            { label: 'Total', value: stats.total, icon: Calendar, color: 'text-gray-700', bg: 'bg-gray-100' },
+            { label: 'Pending', value: stats.pending, icon: Clock, color: 'text-amber-700', bg: 'bg-amber-100' },
+            { label: 'Accepted', value: stats.accepted, icon: CheckCircle2, color: 'text-emerald-700', bg: 'bg-emerald-100' },
+            { label: 'Rejected', value: stats.rejected, icon: XCircle, color: 'text-rose-700', bg: 'bg-rose-100' },
+            { label: 'Cancelled', value: stats.cancelled, icon: Trash2, color: 'text-red-700', bg: 'bg-red-100' },
           ].map((s, i) => (
             <div
               key={i}
@@ -651,15 +583,11 @@ const CoachDashboard: React.FC = () => {
                   <div className="text-xs uppercase tracking-wider text-gray-500 font-bold">
                     {s.label}
                   </div>
-
                   <div className="text-3xl font-black text-gray-900 mt-1">
                     {s.value}
                   </div>
                 </div>
-
-                <div
-                  className={`w-12 h-12 rounded-xl ${s.bg} flex items-center justify-center`}
-                >
+                <div className={`w-12 h-12 rounded-xl ${s.bg} flex items-center justify-center`}>
                   <s.icon className={`w-6 h-6 ${s.color}`} />
                 </div>
               </div>
@@ -671,9 +599,12 @@ const CoachDashboard: React.FC = () => {
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6 flex flex-wrap gap-3 items-center shadow-sm print:hidden">
           <div className="relative flex-1 min-w-[280px]">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <Input value={search} onChange={e => setSearch(e.target.value)}
+            <Input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
               placeholder="Search teams or venues..."
-              className="pl-10 bg-gray-50/50 border-gray-200 focus:bg-white" />
+              className="pl-10 bg-gray-50/50 border-gray-200 focus:bg-white"
+            />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-48 bg-gray-50/50">
@@ -682,13 +613,12 @@ const CoachDashboard: React.FC = () => {
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
               <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="pending_assignment">Pending Assignment</SelectItem>
               <SelectItem value="accepted">Accepted</SelectItem>
               <SelectItem value="rejected">Rejected</SelectItem>
             </SelectContent>
           </Select>
         </div>
-
-
 
         {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
@@ -726,16 +656,13 @@ const CoachDashboard: React.FC = () => {
                   {filtered.map((a) => {
                     const isDeleted = (a as any).deleted;
                     const appointerName = getAppointerName(a);
+                    const canEdit = a.status === 'pending' || a.status === 'pending_assignment';
 
                     return (
                       <tr
                         key={a.id}
-                        className={`
-                          group transition-colors
-                          ${isDeleted
-                            ? 'bg-red-50/30 opacity-45'
-                            : 'hover:bg-emerald-50/30'}
-                        `}
+                        className={`group transition-colors ${isDeleted ? 'bg-red-50/30 opacity-45' : 'hover:bg-emerald-50/30'
+                          }`}
                       >
                         {/* Fixture */}
                         <td className="px-6 py-4">
@@ -745,21 +672,17 @@ const CoachDashboard: React.FC = () => {
                               <span className="text-gray-400 font-normal mx-1 text-xs">vs</span>
                               {a.awayTeam}
                             </span>
-
                             {isDeleted && (
                               <span className="text-[10px] uppercase font-black tracking-wider px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
                                 Archived
                               </span>
                             )}
                           </div>
-
-                          {/* Competition badge + Appointed by */}
                           <div className="flex flex-wrap items-center gap-2 mt-1">
                             <div className="text-[10px] font-bold text-emerald-700 flex items-center gap-1 uppercase tracking-tighter bg-emerald-50 w-fit px-1.5 py-0.5 rounded">
                               <Trophy className="w-3 h-3" />
                               {(a as any).competition || 'League Match'}
                             </div>
-
                             <div className="text-[10px] text-slate-500 flex items-center gap-1">
                               <User className="w-3 h-3 text-slate-400" />
                               Appointed by:{' '}
@@ -780,16 +703,14 @@ const CoachDashboard: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* Date */}
+                        {/* Date & Time */}
                         <td className="px-6 py-4 text-sm text-gray-700">
                           <div className={`font-medium ${isDeleted ? 'line-through' : ''}`}>
                             {a.matchDate}
                           </div>
-
                           <div className="text-xs text-gray-400">
                             {a.matchTime}
                           </div>
-
                           {isDeleted && (
                             <div className="text-[10px] text-red-500 italic mt-1">
                               Archived for audit history
@@ -806,7 +727,6 @@ const CoachDashboard: React.FC = () => {
                                   referees[a.refereeId]?.full_name ||
                                   'Assigned Official'}
                               </span>
-
                               <span className="text-[10px] text-gray-400 uppercase tracking-tighter">
                                 {a.officialRole || 'Referee'}
                               </span>
@@ -818,85 +738,56 @@ const CoachDashboard: React.FC = () => {
                           )}
                         </td>
 
-
                         {/* Status */}
                         <td className="px-6 py-4 text-center">
-                          <div className="flex flex-col items-center gap-1">
-                            {isDeleted ? (
-                              <span className="px-2 py-1 rounded-full text-[10px] uppercase font-bold tracking-wide bg-red-100 text-red-700 border border-red-200">
-                                Cancelled
-                              </span>
-                            ) : (
-                              <StatusBadge status={a.status as AppointmentStatus} />
-                            )}
-
-                            {a.status !== 'pending' && (
-                              <span className="text-[10px] text-gray-500 italic">
-                                {getStatusTimestamp(a)}
-                              </span>
-                            )}
-
-                            {!isDeleted && a.status === 'rejected' && (a as any).rejectionReason && (
-                              <button
-                                onClick={() => setReasonAppt(a)}
-                                className="mt-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-red-600 bg-red-50 border border-red-200 px-2 py-1 rounded-full hover:bg-red-100 transition-colors"
-                              >
-                                <MessageSquareWarning className="w-3 h-3" />
-                                View Reason
-                              </button>
-                            )}
-                          </div>
+                          <StatusBadge status={a.status as AppointmentStatus} />
+                          {a.status === 'rejected' && (a as any).rejectionReason && (
+                            <button
+                              onClick={() => setReasonAppt(a)}
+                              className="mt-1 text-[11px] text-rose-600 hover:text-rose-800 flex items-center justify-center gap-1 mx-auto font-medium"
+                            >
+                              <MessageSquareWarning className="w-3 h-3" />
+                              View Reason
+                            </button>
+                          )}
                         </td>
 
                         {/* Actions */}
                         <td className="px-6 py-4 text-right print:hidden">
                           <div className="flex items-center justify-end gap-1">
-
-                            {/* Hide edit/delete when archived */}
-                            {!isDeleted && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => {
-                                    setEditAppt(a);
-                                    setCreateOpen(true);
-                                  }}
-                                  className={`hover:bg-white border border-transparent hover:border-gray-200
-                                    ${a.status !== 'pending'
-                                      ? 'opacity-30 cursor-not-allowed'
-                                      : ''}`}
-                                  title={
-                                    a.status !== 'pending'
-                                      ? 'Only pending can be edited'
-                                      : 'Edit'
-                                  }
-                                >
-                                  <Pencil className="w-4 h-4 text-gray-400 group-hover:text-blue-500" />
-                                </Button>
-
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleDeleteClick(a)}
-                                  className="hover:bg-white border border-transparent hover:border-red-200"
-                                  title="Archive appointment"
-                                >
-                                  <Trash2 className="w-4 h-4 text-gray-400 group-hover:text-red-500" />
-                                </Button>
-                              </>
+                            {canEdit && !isDeleted && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEditModal(a)}
+                                title="Edit Fixture"
+                                className="h-8 w-8 p-0 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
                             )}
 
-                            {/* Audit Trail always visible */}
                             <Button
-                              size="sm"
                               variant="ghost"
+                              size="sm"
                               onClick={() => setAuditId(a.id)}
-                              className="hover:bg-white border border-transparent hover:border-gray-200"
-                              title="View audit trail"
+                              title="Audit Trail"
+                              className="h-8 w-8 p-0 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50"
                             >
-                              <ScrollText className="w-4 h-4 text-gray-400 group-hover:text-emerald-600" />
+                              <ScrollText className="w-4 h-4" />
                             </Button>
+
+                            {!isDeleted && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteClick(a)}
+                                title="Remove Appointment"
+                                className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -907,144 +798,116 @@ const CoachDashboard: React.FC = () => {
             </div>
           )}
         </div>
-
       </main>
 
-      {/* Create dialog */}
+      {/* ── Dialogs & Drawers ────────────────────────────────────────────────── */}
+
+      {/* Create Appointment */}
       <CreateAppointmentDialog
         open={createOpen}
-        onOpenChange={(open) => {
-          setCreateOpen(open);
-
-          if (!open) {
-            setEditAppt(null);
-          }
-        }}
-        onCreated={() => {
-          setCreateOpen(false);
-          setEditAppt(null);
-        }}
-        editData={editAppt}
+        onOpenChange={setCreateOpen}
       />
 
-      {/* Audit trail drawer */}
-      <AuditTrailDrawer appointmentId={auditId} onClose={() => setAuditId(null)} />
+      {/* Audit Trail Drawer */}
+      {auditId && (
+        <AuditTrailDrawer
+          appointmentId={auditId}
+          open={!!auditId}
+          onClose={() => setAuditId(null)}
+        />
+      )}
 
-
-      {/* ── Executive Overview Modal ── */}
-      <Dialog open={execViewOpen} onOpenChange={setExecViewOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col [&>button]:hidden">
-          <DialogHeader>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <DialogTitle className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                  <span className="bg-emerald-100 p-2 rounded-full">
-                    <ShieldCheck className="w-5 h-5 text-emerald-700" />
-                  </span>
-                  All Appointments
-                </DialogTitle>
-                <p className="text-xs text-slate-500 mt-1">
-                  Executive committee overview — every appointment across all coaches.
-                </p>
-              </div>
-
-              <button
-                onClick={() => setExecViewOpen(false)}
-                aria-label="Close"
-                className="rounded-full p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-          </DialogHeader>
-
-
-          {/* Referee Match Summaries Dialog */}
-          <Dialog open={refereeSummaryOpen} onOpenChange={setRefereeSummaryOpen}>
-            <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto p-0">
-              <DialogHeader className="p-6 pb-0">
-                <DialogTitle className="text-2xl font-black text-slate-900">
-                  Referee Match Summaries
-                </DialogTitle>
-              </DialogHeader>
-
-              <div className="p-6">
-                <RefereeMatchSummaries
-                  appointments={appts}
-                  referees={referees}
-                />
-              </div>
-
-              <DialogFooter className="p-4 bg-slate-50 border-t border-slate-200">
-                <Button variant="outline" onClick={() => setRefereeSummaryOpen(false)}>
-                  Close Summaries
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-
-          <div className="overflow-y-auto pr-1 -mr-1 flex-1">
-            {renderExecSection(
-              'This Week & Upcoming',
-              groupedAppointments.current,
-              'text-emerald-700'
-            )}
-            {renderExecSection(
-              'Last Week',
-              groupedAppointments.lastWeek,
-              'text-amber-700'
-            )}
-            {renderExecSection(
-              'Older',
-              groupedAppointments.older,
-              'text-slate-500'
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-
-      {/* ── Edit Modal ── */}
-      <Dialog open={!!editAppt && !createOpen} onOpenChange={v => !v && setEditAppt(null)}>
+      {/* Edit Appointment Modal */}
+      <Dialog open={!!editAppt} onOpenChange={(open) => !open && setEditAppt(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold text-slate-800">Edit Appointment</DialogTitle>
+            <DialogTitle>Edit Fixture Details</DialogTitle>
           </DialogHeader>
-          {editAppt && (
-            <div className="space-y-4 py-2">
-              <div className="p-3 bg-slate-50 rounded-lg text-sm font-semibold text-slate-700 border border-slate-200">
-                {editAppt.homeTeam} vs {editAppt.awayTeam}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Date</label>
-                  <Input type="date" value={editDate} onChange={e => setEditDate(e.target.value)}
-                    className="border-slate-200 focus:border-emerald-400" />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Kick-off Time</label>
-                  <Input type="time" value={editTime} onChange={e => setEditTime(e.target.value)}
-                    className="border-slate-200 focus:border-emerald-400" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Venue</label>
-                <Input value={editVenue} onChange={e => setEditVenue(e.target.value)}
-                  placeholder="Venue name" className="border-slate-200 focus:border-emerald-400" />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">Notes</label>
-                <textarea value={editNotes} onChange={e => setEditNotes(e.target.value)} rows={3}
-                  placeholder="Any updates or instructions…"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-emerald-400 resize-none" />
-              </div>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1">
+                Assign Referee
+              </label>
+              <Select
+                value={editRefereeId || "unassigned"}
+                onValueChange={(val) => setEditRefereeId(val === "unassigned" ? "" : val)}
+              >
+                <SelectTrigger className="w-full bg-white border-gray-200">
+                  <SelectValue placeholder="Select a referee..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {Object.values(referees)
+                    .filter((ref) => Boolean(ref.id)) // Guard against empty IDs
+                    .map((ref) => (
+                      <SelectItem key={ref.id} value={ref.id}>
+                        {ref.full_name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
             </div>
-          )}
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setEditAppt(null)}>Cancel</Button>
-            <Button onClick={handleEditSave} disabled={editLoading}
-              className="bg-[#006747] hover:bg-[#004d35]">
+            <div>
+              <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1">
+                Match Date
+              </label>
+              <Input
+                type="date"
+                value={editDate}
+                onChange={(e) => setEditDate(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1">
+                Match Time
+              </label>
+              <Input
+                type="time"
+                value={editTime}
+                onChange={(e) => setEditTime(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1">
+                Venue
+              </label>
+              <Input
+                type="text"
+                value={editVenue}
+                onChange={(e) => setEditVenue(e.target.value)}
+                placeholder="Match venue"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1">
+                Notes / Instructions
+              </label>
+              <Input
+                type="text"
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                placeholder="Additional notes"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setEditAppt(null)}
+              disabled={editLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleEditSave}
+              disabled={editLoading}
+              className="bg-[#006747] hover:bg-[#004d35] text-white"
+            >
               {editLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Save Changes
             </Button>
@@ -1052,78 +915,98 @@ const CoachDashboard: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ── Delete Confirm Modal ── */}
-      <Dialog open={!!deleteId} onOpenChange={v => !v && setDeleteId(null)}>
-        <DialogContent className="sm:max-w-sm">
+      {/* Delete Confirm Modal */}
+      <Dialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold text-red-600">Delete Appointment?</DialogTitle>
+            <DialogTitle className="text-red-700">Remove Appointment</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-slate-600 py-2">
-            The appointment will be removed from the active list and archived in the audit history.
+          <p className="text-sm text-gray-600">
+            Are you sure you want to remove this appointment? It will be archived in the system for record-keeping and audit purposes.
           </p>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
-            <Button onClick={handleConfirmDelete} disabled={deleteLoading}
-              className="bg-red-600 hover:bg-red-700 text-white">
+          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteId(null)}
+              disabled={deleteLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={deleteLoading}
+            >
               {deleteLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              Yes, Delete
+              Confirm Remove
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ── Decline Reason Modal ── */}
+      {/* Rejection Reason Modal */}
       <Dialog open={!!reasonAppt} onOpenChange={(open) => !open && setReasonAppt(null)}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg">
-              <span className="bg-red-100 p-2 rounded-full">
-                <MessageSquareWarning className="w-5 h-5 text-red-600" />
-              </span>
-              Decline Reason
+            <DialogTitle className="flex items-center gap-2 text-rose-700">
+              <MessageSquareWarning className="w-5 h-5" />
+              Rejection Reason
             </DialogTitle>
           </DialogHeader>
-
-          {reasonAppt && (
-            <div className="py-2 space-y-4">
-              <div className="text-center pb-3 border-b border-slate-100">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Fixture</p>
-                <h4 className="text-lg font-black text-slate-900">
-                  {reasonAppt.homeTeam} vs {reasonAppt.awayTeam}
-                </h4>
-                <p className="text-xs text-slate-500 mt-1">
-                  {reasonAppt.matchDate} @ {reasonAppt.matchTime}
-                </p>
-              </div>
-
-              <div className="bg-red-50 border border-red-100 rounded-lg p-4">
-                <p className="text-[10px] uppercase font-bold text-red-500 tracking-wider mb-1">
-                  {reasonAppt.refereeName || 'Referee'}'s Reason
-                </p>
-                <p className="text-sm text-red-900 whitespace-pre-wrap">
-                  {reasonAppt.rejectionReason}
-                </p>
-              </div>
-
-              {reasonAppt.updatedAt && (
-                <p className="text-[11px] text-slate-400 text-center italic">
-                  Declined {getStatusTimestamp(reasonAppt)}
-                </p>
-              )}
-            </div>
-          )}
+          <div className="bg-rose-50 border border-rose-200 rounded-lg p-4 text-sm text-rose-900 mt-2">
+            {(reasonAppt as any)?.rejectionReason || "No specific reason provided."}
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setReasonAppt(null)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Team Registration */}
-      <TeamRegistrationForm
-        open={teamRegistrationOpen}
-        onOpenChange={setTeamRegistrationOpen}
-        onCreated={() => {
-          setTeamRegistrationOpen(false);
-        }}
-      />
+      {/* Executive Overview Drawer / Dialog */}
+      <Dialog open={execViewOpen} onOpenChange={setExecViewOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col p-6">
+          <DialogHeader className="border-b pb-3">
+            <DialogTitle className="flex items-center gap-2 text-lg font-black text-slate-900">
+              <ShieldCheck className="w-5 h-5 text-emerald-700" />
+              Executive Appointments View
+            </DialogTitle>
+          </DialogHeader>
 
+          <div className="overflow-y-auto flex-1 pr-1 space-y-6 my-4">
+            {renderExecSection("Current / Upcoming Fixtures", groupedAppointments.current, "text-emerald-700")}
+            {renderExecSection("Last Week's Fixtures", groupedAppointments.lastWeek, "text-amber-700")}
+            {renderExecSection("Older Fixtures", groupedAppointments.older, "text-slate-500")}
+          </div>
+
+          <DialogFooter className="border-t pt-3">
+            <Button variant="outline" onClick={() => setExecViewOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Referee Summaries Modal */}
+      <Dialog open={refereeSummaryOpen} onOpenChange={setRefereeSummaryOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Referee Match Summaries</DialogTitle>
+          </DialogHeader>
+          <RefereeMatchSummaries />
+        </DialogContent>
+      </Dialog>
+
+      {/* Team Registration Modal */}
+      <Dialog open={teamRegistrationOpen} onOpenChange={setTeamRegistrationOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Team Registration</DialogTitle>
+          </DialogHeader>
+          <TeamRegistrationForm onSuccess={() => setTeamRegistrationOpen(false)} />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
