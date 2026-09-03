@@ -145,8 +145,10 @@ const Hero: React.FC = () => {
               </div>
             ))}
           </div>
-          <div className="mt-12 text-center text-white/50 text-sm">
-            © {new Date().getFullYear()} Eastern Province Rugby Union — Referee Appointment System
+          <div className="mt-12 text-center text-white/50 text-sm flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2">
+            <span>© {new Date().getFullYear()} EPRU — Referee Appointment System.</span>
+            <span className="hidden sm:inline-block text-white/30">•</span>
+            <span>Developed by Nextgen Skills Development</span>
           </div>
         </div>
       </div>
