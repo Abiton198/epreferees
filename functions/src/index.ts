@@ -1,24 +1,11 @@
 /**
- * functions/src/index.ts — EPRU Referee Portal email notifications v2
+ * functions/src/index.ts — EPRU Referee Portal email notifications v3
  * ─────────────────────────────────────────────────────────────────────────────
- * Email strategy (optimised for free tier):
- *
- *   REFEREES  → immediate individual email on every new appointment
- *   COACHES   → NO individual emails — batched summary every 20 responses
- *
- * Firestore collections:
- *   coachNotificationQueue/{docId}  — one doc per queued coach notification
- *   coachSummaryCounters/{coachId}  — pending count + flush lock per coach
- *   emailQueue/{docId}              — failed emails awaiting retry
- *
- * Concurrency note:
- *   coachSummaryCounters/{coachId} carries a `flushInProgress` flag that is
- *   claimed transactionally. Only the caller that successfully flips it
- *   false → true (in the SAME transaction as the count increment) is allowed
- *   to send the summary email. This prevents two near-simultaneous referee
- *   responses from both triggering a flush at the 20-item threshold. The
- *   lock is always released in a `finally`, so a failed send self-heals on
- *   the next event or the daily cron.
+ * Email strategy:
+ *   - REFEREES  → immediate individual email on new appointment / assignment
+ *   - COACHES   → immediate individual email when appointed as Referee Assessment Coach
+ *               → batched summary every 20 referee responses (or daily at 08:00)
+ *               → immediate urgent alert when a referee declines
  */
 
 import { onDocumentCreated, onDocumentUpdated }
@@ -40,22 +27,32 @@ const SUMMARY_THRESHOLD = 20;
 // HELPERS
 // ══════════════════════════════════════════════════════════════════════════
 
-async function getUserEmail(uid: string): Promise<string | null> {
+async function getUserEmail(uid?: string | null): Promise<string | null> {
+  if (!uid) return null;
   try {
     const snap = await db.collection('users').doc(uid).get();
     return snap.exists ? (snap.data()?.email ?? null) : null;
   } catch { return null; }
 }
 
-async function getUserName(uid: string): Promise<string> {
+async function getUserName(uid?: string | null, fallback = 'Official'): Promise<string> {
+  if (!uid) return fallback;
   try {
     const snap = await db.collection('users').doc(uid).get();
     const d = snap.data();
-    return d ? `${d.firstName ?? ''} ${d.lastName ?? ''}`.trim() || 'Referee' : 'Referee';
-  } catch { return 'Referee'; }
+    if (!d) return fallback;
+    return (
+      d.full_name ||
+      d.fullName ||
+      d.displayName ||
+      `${d.firstName ?? ''} ${d.lastName ?? ''}`.trim() ||
+      fallback
+    );
+  } catch { return fallback; }
 }
 
-function formatDate(dateStr: string): string {
+function formatDate(dateStr?: string | null): string {
+  if (!dateStr) return 'TBD';
   try {
     return new Date(dateStr).toLocaleDateString('en-ZA', {
       weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
@@ -63,7 +60,8 @@ function formatDate(dateStr: string): string {
   } catch { return dateStr; }
 }
 
-function formatTime(timeStr: string): string {
+function formatTime(timeStr?: string | null): string {
+  if (!timeStr) return 'TBD';
   try {
     const [h, m] = timeStr.split(':');
     const d = new Date();
@@ -99,9 +97,173 @@ async function sendOrQueue(
   }
 }
 
+async function sendCoachAssessmentInvitation(
+  resend: Resend,
+  params: {
+    coachId?: string | null;
+    coachEmail?: string | null;
+    coachName?: string | null;
+    refereeId?: string | null;
+    refereeName?: string | null;
+    matchTitle: string;
+    dateStr?: string | null;
+    timeStr?: string | null;
+    venue?: string | null;
+    level?: string | null;
+    appointedBy?: string | null;
+  },
+): Promise<void> {
+  const coachEmail = params.coachEmail || await getUserEmail(params.coachId);
+  if (!coachEmail) {
+    console.warn('[Coach Invite] No coach email found for:', params.coachId || params.coachName);
+    return;
+  }
+
+  const coachName = params.coachName || await getUserName(params.coachId, 'Coach');
+  const refereeName = params.refereeName || await getUserName(params.refereeId, 'TBD');
+
+  await sendOrQueue(resend, {
+    from: FROM_ADDRESS,
+    to: coachEmail,
+    subject: `🎯 Referee Assessment Coach Appointment — ${params.matchTitle}`,
+    html: coachAppointmentEmailHtml({
+      coachName,
+      refereeName,
+      matchTitle: params.matchTitle,
+      date: formatDate(params.dateStr),
+      time: formatTime(params.timeStr),
+      venue: params.venue || 'TBD',
+      level: params.level || 'Club',
+      appointedBy: params.appointedBy || 'EPRU Executive',
+      portalUrl: PORTAL_URL,
+    }),
+  });
+
+  console.log('[Email -> Appointed Coach]', coachEmail, 'for', params.matchTitle);
+}
 
 // ══════════════════════════════════════════════════════════════════════════
-// COACH NOTIFICATION QUEUE
+// RESOLVE APPOINTING EXECUTIVE FOR A COACH REPORT
+// ══════════════════════════════════════════════════════════════════════════
+
+async function resolveAppointingExecutive(
+  report: Record<string, any>,
+): Promise<{ email: string | null; name: string }> {
+  // 1. Direct email on report if present
+  if (report.appointedByEmail && typeof report.appointedByEmail === 'string') {
+    return {
+      email: report.appointedByEmail.trim(),
+      name: report.appointedByName || 'Executive',
+    };
+  }
+
+  const candidateUids: string[] = [];
+  const pushUid = (val: unknown) => {
+    if (typeof val === 'string' && val.trim() && !candidateUids.includes(val.trim())) {
+      candidateUids.push(val.trim());
+    }
+  };
+
+  pushUid(report.appointedByUid);
+  pushUid(report.appointedById);
+  pushUid(report.executiveUid);
+  pushUid(report.excoUid);
+
+  const matchId = report.matchDetails?.matchId || report.matchId || null;
+  const coachApptId = report.appointmentId || null;
+
+  // 2. Check linked `coachAppointments` doc if present
+  if (coachApptId) {
+    try {
+      const caSnap = await db.collection('coachAppointments').doc(coachApptId).get();
+      if (caSnap.exists) {
+        const ca = caSnap.data()!;
+        if (ca.appointedByEmail && typeof ca.appointedByEmail === 'string') {
+          return {
+            email: ca.appointedByEmail.trim(),
+            name: ca.appointedByName || ca.appointedBy || 'Executive',
+          };
+        }
+        pushUid(ca.appointedByUid);
+        pushUid(ca.appointedById);
+        pushUid(ca.createdByUid);
+        pushUid(ca.createdBy);
+      }
+    } catch (err) {
+      console.warn('[Exco Lookup] Failed reading coachAppointments:', err);
+    }
+  }
+
+  // 3. Check parent `appointments` fixture doc & its auditTrail
+  if (matchId) {
+    try {
+      const apptSnap = await db.collection('appointments').doc(matchId).get();
+      if (apptSnap.exists) {
+        const appt = apptSnap.data()!;
+        if (appt.appointedByEmail && typeof appt.appointedByEmail === 'string') {
+          return {
+            email: appt.appointedByEmail.trim(),
+            name: appt.appointedByName || appt.appointedBy || 'Executive',
+          };
+        }
+
+        pushUid(appt.coachAppointedByUid);
+        pushUid(appt.appointedByUid);
+        pushUid(appt.appointedById);
+        pushUid(appt.createdByUid);
+        pushUid(appt.createdBy);
+        pushUid(appt.userId);
+
+        // Look through auditTrail (most recent first) for coach assignment or fixture creation
+        if (Array.isArray(appt.auditTrail)) {
+          for (let i = appt.auditTrail.length - 1; i >= 0; i--) {
+            const entry = appt.auditTrail[i];
+            if (!entry) continue;
+            const action = String(entry.action || '').toLowerCase();
+            if (
+              action.includes('coach') ||
+              action.includes('appoint') ||
+              action.includes('created') ||
+              entry.byRole === 'executive'
+            ) {
+              pushUid(entry.by);
+              pushUid(entry.byUid);
+              pushUid(entry.actorId);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Exco Lookup] Failed reading appointments:', err);
+    }
+  }
+
+  // 4. Resolve email from `users` for the first matching UID
+  for (const uid of candidateUids) {
+    try {
+      const userSnap = await db.collection('users').doc(uid).get();
+      if (userSnap.exists) {
+        const u = userSnap.data()!;
+        if (u.email) {
+          const execName =
+            u.full_name ||
+            u.fullName ||
+            u.displayName ||
+            `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() ||
+            'Executive';
+          return { email: String(u.email).trim(), name: execName };
+        }
+      }
+    } catch (err) {
+      console.warn('[Exco Lookup] Failed reading user doc:', uid, err);
+    }
+  }
+
+  return { email: null, name: 'Executive' };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// COACH NOTIFICATION QUEUE (Referee accept/decline summaries)
 // ══════════════════════════════════════════════════════════════════════════
 
 interface QueuedNotification {
@@ -118,12 +280,6 @@ interface QueuedNotification {
   sent: boolean;
 }
 
-/**
- * Atomically increments the pending counter for a coach. If the counter
- * crosses SUMMARY_THRESHOLD and no flush is already in progress, this also
- * claims the flush lock (flushInProgress: true) in the SAME transaction, so
- * exactly one caller — even under concurrent writes — gets shouldSend=true.
- */
 async function claimFlushIfThresholdReached(
   coachId: string,
   coachEmail: string,
@@ -142,7 +298,7 @@ async function claimFlushIfThresholdReached(
 
     tx.set(counterRef, {
       pendingCount: next,
-      flushInProgress: locked || shouldSend, // claim lock if we're triggering
+      flushInProgress: locked || shouldSend,
       coachEmail,
       coachName,
       lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
@@ -152,10 +308,6 @@ async function claimFlushIfThresholdReached(
   });
 }
 
-/**
- * Transactionally attempts to claim the flush lock without an increment.
- * Used by the daily catch-up cron so it never races a live threshold flush.
- */
 async function tryClaimFlushLock(coachId: string): Promise<boolean> {
   const counterRef = db.collection('coachSummaryCounters').doc(coachId);
   return db.runTransaction(async (tx) => {
@@ -183,7 +335,6 @@ async function queueCoachNotification(
   coachName: string,
   notification: Omit<QueuedNotification, 'coachId' | 'coachEmail' | 'coachName' | 'sent'>,
 ): Promise<{ shouldSend: boolean; count: number }> {
-
   await db.collection('coachNotificationQueue').add({
     coachId, coachEmail, coachName,
     ...notification,
@@ -196,14 +347,6 @@ async function queueCoachNotification(
   return { shouldSend, count };
 }
 
-/**
- * Sends the batched summary email for a coach. Caller MUST already hold the
- * flush lock (flushInProgress: true) before calling this. The lock is
- * always released on the way out — on success the counter is also reset to
- * 0 so the next batch starts clean; on failure only the lock is released,
- * leaving pendingCount untouched so the next referee response (or the daily
- * cron) retries the flush automatically.
- */
 async function flushCoachSummary(
   resend: Resend,
   coachId: string,
@@ -218,7 +361,7 @@ async function flushCoachSummary(
       .get();
 
     if (snap.empty) {
-      await releaseFlushLock(coachId, /* resetCount */ true);
+      await releaseFlushLock(coachId, true);
       return;
     }
 
@@ -226,21 +369,22 @@ async function flushCoachSummary(
       id: d.id, ...(d.data() as QueuedNotification),
     }));
 
-    // Standardize additional summary emails
-    const additionalEmails = ['ctobias@mandelametro.gov.za', 'eprrschairperson@gmail.com', 'rodneybonaparte04@gmail.com'];
+    const additionalEmails = [
+      'ctobias@mandelametro.gov.za',
+      'eprrschairperson@gmail.com',
+      'rodneybonaparte04@gmail.com',
+    ];
     const normalizedCoach = coachEmail?.trim().toLowerCase();
 
-    // Only keep extra emails that DO NOT match the coach's email
     const extraRecipients = additionalEmails.filter(
       email => email.trim().toLowerCase() !== normalizedCoach
     );
 
-    // Final list: primary coach email + non-duplicate extra emails
     const RECIPIENTS = [coachEmail, ...extraRecipients].filter(Boolean);
 
     await sendOrQueue(resend, {
       from: FROM_ADDRESS,
-      to: RECIPIENTS.join(', '), // Or RECIPIENTS if sendOrQueue accepts string[]
+      to: RECIPIENTS.join(', '),
       subject: `📊 Appointment Summary — ${notifications.length} updates`,
       html: summaryEmailHtml({ coachName, notifications }),
     });
@@ -249,10 +393,10 @@ async function flushCoachSummary(
     snap.docs.forEach(d => batch.update(d.ref, { sent: true }));
     await batch.commit();
 
-    await releaseFlushLock(coachId, /* resetCount */ true);
+    await releaseFlushLock(coachId, true);
     console.log(`[Summary] Sent ${notifications.length} items to ${RECIPIENTS.join(', ')}`);
   } catch (err) {
-    await releaseFlushLock(coachId, /* resetCount */ false);
+    await releaseFlushLock(coachId, false);
     console.error(`[Summary] Flush failed for ${coachId}:`, err);
     throw err;
   }
@@ -260,7 +404,7 @@ async function flushCoachSummary(
 
 
 // ══════════════════════════════════════════════════════════════════════════
-// TRIGGER 1 — Appointment created → email referee immediately
+// TRIGGER 1 — Appointment created → email referee & appointed coach immediately
 // ══════════════════════════════════════════════════════════════════════════
 
 export const onAppointmentCreated = onDocumentCreated(
@@ -276,39 +420,57 @@ export const onAppointmentCreated = onDocumentCreated(
     }
 
     const resend = new Resend(RESEND_KEY.value());
-    const refereeEmail = appt.refereeEmail ?? await getUserEmail(appt.refereeId);
-    const refereeName = appt.refereeName ?? await getUserName(appt.refereeId);
+    const matchTitle = `${appt.homeTeam || 'TBD'} vs ${appt.awayTeam || 'TBD'}`;
 
-    if (!refereeEmail) {
+    // 1. Referee notification
+    const refereeEmail = appt.refereeEmail ?? await getUserEmail(appt.refereeId);
+    const refereeName = appt.refereeName ?? await getUserName(appt.refereeId, 'Referee');
+
+    if (refereeEmail) {
+      await sendOrQueue(resend, {
+        from: FROM_ADDRESS,
+        to: refereeEmail,
+        subject: `📋 New Match Appointment — ${matchTitle}`,
+        html: appointmentEmailHtml({
+          refereeName,
+          coachName: appt.coachName || 'Your coach',
+          homeTeam: appt.homeTeam || 'TBD',
+          awayTeam: appt.awayTeam || 'TBD',
+          venue: appt.venue || 'TBD',
+          date: formatDate(appt.date || appt.matchDate || ''),
+          time: formatTime(appt.time || appt.matchTime || ''),
+          role: (appt.role || appt.officialRole || 'Referee')
+            .replace(/^\w/, (c: string) => c.toUpperCase()),
+          portalUrl: PORTAL_URL,
+        }),
+      });
+      console.log('[Email -> Referee]', refereeEmail);
+    } else {
       console.warn('[Created] No referee email:', event.params.apptId);
-      return;
     }
 
-    await sendOrQueue(resend, {
-      from: FROM_ADDRESS,
-      to: refereeEmail,
-      subject: `📋 New Match Appointment — ${appt.homeTeam} vs ${appt.awayTeam}`,
-      html: appointmentEmailHtml({
+    // 2. Coach assessment appointment notification (if a coach was assigned at creation)
+    if (appt.coachId || appt.coachEmail) {
+      await sendCoachAssessmentInvitation(resend, {
+        coachId: appt.coachId,
+        coachEmail: appt.coachEmail,
+        coachName: appt.coachName,
+        refereeId: appt.refereeId,
         refereeName,
-        coachName: appt.coachName || 'Your coach',
-        homeTeam: appt.homeTeam || 'TBD',
-        awayTeam: appt.awayTeam || 'TBD',
+        matchTitle,
+        dateStr: appt.date || appt.matchDate || '',
+        timeStr: appt.time || appt.matchTime || '',
         venue: appt.venue || 'TBD',
-        date: formatDate(appt.date || appt.matchDate || ''),
-        time: formatTime(appt.time || appt.matchTime || ''),
-        role: (appt.role || appt.officialRole || 'Referee')
-          .replace(/^\w/, (c: string) => c.toUpperCase()),
-        portalUrl: PORTAL_URL,
-      }),
-    });
-
-    console.log('[Email -> Referee]', refereeEmail);
+        level: appt.competition || appt.competitionName || appt.teamLevel || 'Club',
+        appointedBy: appt.createdByName || appt.appointedBy || 'EPRU Executive',
+      });
+    }
   }
 );
 
 
 // ══════════════════════════════════════════════════════════════════════════
-// TRIGGER 2 — Referee responds → queue for coach batch summary
+// TRIGGER 2 — Appointment updated → new referee, new/changed coach, or response
 // ══════════════════════════════════════════════════════════════════════════
 
 export const onAppointmentUpdated = onDocumentUpdated(
@@ -318,22 +480,24 @@ export const onAppointmentUpdated = onDocumentUpdated(
     const after = event.data?.after.data();
     if (!before || !after) return;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // NEW CASE: Referee newly assigned via Edit (pending_assignment -> pending)
-    // ─────────────────────────────────────────────────────────────────────────
-    const isNewlyAssigned = (!before.refereeId && after.refereeId) ||
-      (before.status === 'pending_assignment' && after.status === 'pending');
+    const resend = new Resend(RESEND_KEY.value());
+    const matchTitle = `${after.homeTeam || 'TBD'} vs ${after.awayTeam || 'TBD'}`;
 
-    if (isNewlyAssigned && after.refereeId) {
-      const resend = new Resend(RESEND_KEY.value());
+    // 1. Newly assigned or swapped Referee
+    const isNewlyAssignedRef =
+      (!before.refereeId && after.refereeId) ||
+      (before.status === 'pending_assignment' && after.status === 'pending') ||
+      (before.refereeId && after.refereeId && before.refereeId !== after.refereeId);
+
+    if (isNewlyAssignedRef && after.refereeId) {
       const refereeEmail = after.refereeEmail ?? await getUserEmail(after.refereeId);
-      const refereeName = after.refereeName ?? await getUserName(after.refereeId);
+      const refereeName = after.refereeName ?? await getUserName(after.refereeId, 'Referee');
 
       if (refereeEmail) {
         await sendOrQueue(resend, {
           from: FROM_ADDRESS,
           to: refereeEmail,
-          subject: `📋 New Match Appointment — ${after.homeTeam || 'TBD'} vs ${after.awayTeam || 'TBD'}`,
+          subject: `📋 New Match Appointment — ${matchTitle}`,
           html: appointmentEmailHtml({
             refereeName,
             coachName: after.coachName || 'Your coach',
@@ -347,39 +511,55 @@ export const onAppointmentUpdated = onDocumentUpdated(
             portalUrl: PORTAL_URL,
           }),
         });
-
         console.log('[Email -> Newly Assigned Referee]', refereeEmail);
       }
-      return; // Handled newly assigned case
     }
 
+    // 2. Newly assigned or swapped Referee Assessment Coach
+    const isNewlyAssignedCoach =
+      Boolean(after.coachId || after.coachEmail) &&
+      (before.coachId !== after.coachId || before.coachEmail !== after.coachEmail);
+
+    if (isNewlyAssignedCoach) {
+      await sendCoachAssessmentInvitation(resend, {
+        coachId: after.coachId,
+        coachEmail: after.coachEmail,
+        coachName: after.coachName,
+        refereeId: after.refereeId,
+        refereeName: after.refereeName,
+        matchTitle,
+        dateStr: after.date || after.matchDate || '',
+        timeStr: after.time || after.matchTime || '',
+        venue: after.venue || 'TBD',
+        level: after.competition || after.competitionName || after.teamLevel || 'Club',
+        appointedBy: after.updatedByName || after.appointedBy || 'EPRU Executive',
+      });
+    }
+
+    // 3. Referee status response (accepted / rejected)
     if (before.status === after.status) return;
 
     const isAccepted = after.status === 'accepted' && before.status !== 'accepted';
     const isRejected = after.status === 'rejected' && before.status !== 'rejected';
     if (!isAccepted && !isRejected) return;
 
-    const resend = new Resend(RESEND_KEY.value());
     const coachId = after.coachId;
     const coachEmail = after.coachEmail ?? await getUserEmail(coachId);
     const coachName = after.coachName || 'Coach';
-    const refereeName = after.refereeName ?? await getUserName(after.refereeId);
+    const refereeName = after.refereeName ?? await getUserName(after.refereeId, 'Referee');
 
     if (!coachEmail || !coachId) {
       console.warn('[Updated] No coach info:', event.params.apptId);
       return;
     }
 
-    const matchInfo = `${after.homeTeam || 'TBD'} vs ${after.awayTeam || 'TBD'}`;
     const date = formatDate(after.date || after.matchDate || '');
     const time = formatTime(after.time || after.matchTime || '');
     const venue = after.venue || 'TBD';
 
-    // 🔴 IMMEDIATE NOTIFICATION FOR REJECTIONS
     if (isRejected) {
       const reason = after.rejectionReason || after.declineReason || 'No reason provided';
 
-      // 1. Send immediate urgent email directly to coach & extra summary recipients
       const additionalEmails = ['ctobias@mandelametro.gov.za', 'eprrschairperson@gmail.com'];
       const normalizedCoach = coachEmail.trim().toLowerCase();
       const extraRecipients = additionalEmails.filter(
@@ -390,31 +570,30 @@ export const onAppointmentUpdated = onDocumentUpdated(
       await sendOrQueue(resend, {
         from: FROM_ADDRESS,
         to: RECIPIENTS,
-        subject: `🚨 URGENT: Referee Declined — ${matchInfo}`,
+        subject: `🚨 URGENT: Referee Declined — ${matchTitle}`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
             <h2 style="color: #dc2626; margin-top: 0;">🚨 Referee Appointment Declined</h2>
             <p>Hi <strong>${coachName}</strong>,</p>
             <p><strong>${refereeName}</strong> has declined the appointment for your upcoming fixture. Please review the details below and reassign another referee immediately.</p>
-            
+
             <div style="background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 12px 16px; margin: 20px 0; border-radius: 4px;">
-              <p style="margin: 4px 0;"><strong>Match:</strong> ${matchInfo}</p>
+              <p style="margin: 4px 0;"><strong>Match:</strong> ${matchTitle}</p>
               <p style="margin: 4px 0;"><strong>Date:</strong> ${date} at ${time}</p>
               <p style="margin: 4px 0;"><strong>Venue:</strong> ${venue}</p>
               <p style="margin: 4px 0; color: #991b1b;"><strong>Reason Given:</strong> ${reason}</p>
             </div>
-            
+
             <p>Log in to the portal now to select a replacement referee.</p>
           </div>
         `,
       });
 
-      // 2. Log in the queue as already sent (so it appears in history without double-emailing)
       await db.collection('coachNotificationQueue').add({
         coachId,
         type: 'rejected',
         refereeName,
-        matchInfo,
+        matchInfo: matchTitle,
         date,
         time,
         venue,
@@ -427,14 +606,13 @@ export const onAppointmentUpdated = onDocumentUpdated(
       return;
     }
 
-    // 🟢 ACCEPTED APPOINTMENTS (Follow standard queue/summary logic)
     if (isAccepted) {
       const { shouldSend } = await queueCoachNotification(
         coachId, coachEmail, coachName,
         {
           type: 'accepted',
           refereeName,
-          matchInfo,
+          matchInfo: matchTitle,
           date,
           time,
           venue,
@@ -451,8 +629,168 @@ export const onAppointmentUpdated = onDocumentUpdated(
 
 
 // ══════════════════════════════════════════════════════════════════════════
+// TRIGGER 3 — Coach appointment doc created/updated in `coachAppointments`
+// ══════════════════════════════════════════════════════════════════════════
+
+export const onCoachAppointmentCreated = onDocumentCreated(
+  { document: 'coachAppointments/{coachApptId}', secrets: [RESEND_KEY] },
+  async (event) => {
+    const coachAppt = event.data?.data();
+    if (!coachAppt) return;
+
+    const createdAt = event.data?.createTime?.toDate();
+    if (Date.now() - (createdAt?.getTime() ?? 0) > 5 * 60 * 1000) return;
+
+    // If linked to a parent match doc, `onAppointmentCreated`/`onAppointmentUpdated`
+    // already handles emailing when `appointments` is created/edited; only send here
+    // if created standalone or explicitly flagged with `sendInviteEmail: true`.
+    if (coachAppt.matchId && !coachAppt.sendInviteEmail) return;
+
+    const resend = new Resend(RESEND_KEY.value());
+    await sendCoachAssessmentInvitation(resend, {
+      coachId: coachAppt.coachId,
+      coachEmail: coachAppt.coachEmail,
+      coachName: coachAppt.coachName,
+      refereeId: coachAppt.refereeId,
+      refereeName: coachAppt.refereeName,
+      matchTitle: coachAppt.match || 'Upcoming Fixture',
+      dateStr: coachAppt.matchDate || coachAppt.date || '',
+      timeStr: coachAppt.kickoffTime || coachAppt.time || '',
+      venue: coachAppt.venue || 'TBD',
+      level: coachAppt.level || 'Club',
+      appointedBy: coachAppt.appointedBy || 'EPRU Executive',
+    });
+  }
+);
+
+// ══════════════════════════════════════════════════════════════════════════
+// TRIGGER 4 — Coach submits report → email ONLY appointing Executive
+// ══════════════════════════════════════════════════════════════════════════
+
+export const onCoachReportCreated = onDocumentCreated(
+  { document: 'coachReports/{reportId}', secrets: [RESEND_KEY] },
+  async (event) => {
+    const report = event.data?.data();
+    if (!report) return;
+
+    const createdAt = event.data?.createTime?.toDate();
+    if (Date.now() - (createdAt?.getTime() ?? 0) > 5 * 60 * 1000) {
+      console.log('[Skip] Old coachReport document:', event.params.reportId);
+      return;
+    }
+
+    const { email: execEmail, name: execName } = await resolveAppointingExecutive(report);
+    if (!execEmail) {
+      console.warn('[CoachReport] Could not resolve appointing executive email for:', event.params.reportId);
+      return;
+    }
+
+    const matchDetails = report.matchDetails || {};
+    const coach = report.coach || {};
+    const referee = report.referee || {};
+    const gameStats = report.gameStats || {};
+    const coachingNotes = report.coachingNotes || {};
+
+    const matchTitle =
+      matchDetails.match ||
+      report.match ||
+      `${matchDetails.homeTeam || 'TBD'} vs ${matchDetails.awayTeam || 'TBD'}`;
+
+    const coachName = coach.name || report.coachName || 'Referee Assessment Coach';
+    const refereeName = referee.name || report.refereeName || 'Referee';
+    const rating = report.rating ?? report.overallRating;
+    const totalPenalties = gameStats.totalPenalties ?? gameStats.penalties;
+    const reportTypeLabel =
+      report.reportType === 'incident'
+        ? 'Match Incident Report'
+        : 'Referee Performance Report';
+
+    const resend = new Resend(RESEND_KEY.value());
+    await sendOrQueue(resend, {
+      from: FROM_ADDRESS,
+      to: execEmail,
+      subject: `📝 Coach Report Submitted: ${matchTitle} (${refereeName})`,
+      html: coachReportSubmittedEmailHtml({
+        executiveName: execName,
+        reportType: reportTypeLabel,
+        coachName,
+        refereeName,
+        matchTitle,
+        date: formatDate(matchDetails.matchDate || report.matchDate || ''),
+        venue: matchDetails.venue || report.venue || 'TBD',
+        level: matchDetails.level || report.level || 'Club',
+        rating: rating ? `${rating} / 5 ★` : 'N/A',
+        totalPenalties: totalPenalties !== undefined ? String(totalPenalties) : 'N/A',
+        strengths: coachingNotes.strengths || report.comments || '',
+        portalUrl: PORTAL_URL,
+      }),
+    });
+
+    console.log(`[Email -> Appointing Executive Only] ${execEmail} for report ${event.params.reportId}`);
+  }
+);
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// EMAIL TEMPLATE — COACH REPORT SUBMITTED (TO APPOINTING EXECUTIVE)
+// ══════════════════════════════════════════════════════════════════════════
+
+function coachReportSubmittedEmailHtml(p: {
+  executiveName: string;
+  reportType: string;
+  coachName: string;
+  refereeName: string;
+  matchTitle: string;
+  date: string;
+  venue: string;
+  level: string;
+  rating: string;
+  totalPenalties: string;
+  strengths: string;
+  portalUrl: string;
+}): string {
+  const fields: Record<string, string> = {
+    'Report Type': p.reportType,
+    'Match': p.matchTitle,
+    'Assessed Referee': p.refereeName,
+    'Assessment Coach': p.coachName,
+    'Date': p.date,
+    'Venue': p.venue,
+    'Level': p.level,
+    'Star Rating': p.rating,
+  };
+
+  if (p.totalPenalties !== 'N/A') {
+    fields['Total Penalties'] = p.totalPenalties;
+  }
+
+  const notesBlock = p.strengths
+    ? `<p style="margin:14px 0 0;font-size:13px;color:#374151;
+               background:#f8fafc;border:1px solid #e2e8f0;
+               border-radius:8px;padding:12px 14px;line-height:1.5;">
+         <strong style="color:#111827;">Key Notes / Summary:</strong> ${p.strengths}
+       </p>`
+    : '';
+
+  return baseHtml(`
+    <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#059669;
+               text-transform:uppercase;letter-spacing:1px;">Assessment Report Submitted</p>
+    <h2 style="margin:0 0 8px;font-size:20px;font-weight:900;color:#1f2937;">
+      New report ready for review, ${p.executiveName.split(' ')[0]}
+    </h2>
+    <p style="margin:0 0 16px;font-size:14px;color:#6b7280;line-height:1.6;">
+      <strong>${p.coachName}</strong> has submitted a <strong>${p.reportType}</strong> for
+      <strong>${p.refereeName}</strong>. Because you appointed this assessment coach, please
+      log in to the EPRU Referee Portal to inspect the full report.
+    </p>
+    ${matchCard(fields)}
+    ${notesBlock}
+    ${ctaButton('Check Report in Portal', p.portalUrl)}
+  `);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 // SCHEDULED — Daily 08:00: flush any coach with pending notifications
-// Ensures coaches receive updates even if threshold not yet reached
 // ══════════════════════════════════════════════════════════════════════════
 
 export const dailyCoachSummary = onSchedule(
@@ -472,8 +810,6 @@ export const dailyCoachSummary = onSchedule(
     for (const doc of countersSnap.docs) {
       const { coachEmail, coachName } = doc.data();
 
-      // Skip coaches whose flush is already in progress via the live trigger
-      // to avoid sending the same batch twice.
       const claimed = await tryClaimFlushLock(doc.id);
       if (!claimed) {
         console.log(`[Daily] Skipping ${doc.id} — flush already in progress`);
@@ -619,6 +955,40 @@ function appointmentEmailHtml(p: {
       &#9888;&#65039; Please respond promptly. Pending appointments may be reassigned.
     </p>
     ${ctaButton('View & Respond', p.portalUrl)}
+  `);
+}
+
+function coachAppointmentEmailHtml(p: {
+  coachName: string; refereeName: string; matchTitle: string;
+  date: string; time: string; venue: string; level: string;
+  appointedBy: string; portalUrl: string;
+}): string {
+  return baseHtml(`
+    <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#059669;
+               text-transform:uppercase;letter-spacing:1px;">Referee Assessment Coach Appointment</p>
+    <h2 style="margin:0 0 8px;font-size:20px;font-weight:900;color:#1f2937;">
+      Assessment Appointment for ${p.coachName.split(' ')[0]}
+    </h2>
+    <p style="margin:0 0 16px;font-size:14px;color:#6b7280;line-height:1.6;">
+      <strong>${p.appointedBy}</strong> has appointed you as the
+      <strong>Referee Assessment Coach</strong> for the match below. Please log in to the
+      EPRU Referee Portal to <strong>accept or decline</strong> this appointment.
+    </p>
+    ${matchCard({
+    'Match': p.matchTitle,
+    'Referee': p.refereeName,
+    'Date': p.date,
+    'Kickoff': p.time,
+    'Venue': p.venue,
+    'Level': p.level,
+  })}
+    <p style="margin:16px 0 0;font-size:13px;color:#065f46;
+               background:#ecfdf5;border:1px solid #a7f3d0;
+               border-radius:8px;padding:10px 14px;">
+      &#128203; Your appointment invitation is waiting in your Coach Dashboard popup.
+      Please respond promptly so fixture planning stays up to date.
+    </p>
+    ${ctaButton('Respond in Portal', p.portalUrl)}
   `);
 }
 
