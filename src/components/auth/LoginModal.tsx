@@ -35,18 +35,11 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [selectedRole, setSelectedRole] = useState<'coach' | 'referee'>('referee');
 
-  // Single source of truth for the post-auth flow. Replaces the old
-  // showRoleSelection/showSetup booleans, which could briefly both be
-  // false at once (because of the awaits in between setting them),
-  // flashing this Dialog back open mid-transition.
   const [stage, setStage] = useState<Stage>('auth');
   const [pendingUser, setPendingUser] = useState<any>(null);
 
-  // Reset the entire flow whenever the modal is (re-)opened.
-  // Without this, stage stays at 'done' or 'setup' from a previous
-  // session if the component was never unmounted, which prevents
-  // the login dialog from appearing on subsequent opens.
   useEffect(() => {
     if (open) {
       setStage('auth');
@@ -54,6 +47,7 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
       setEmail('');
       setPassword('');
       setFullName('');
+      setSelectedRole('referee');
       setStatusMessage(null);
       setPendingUser(null);
     }
@@ -65,28 +59,37 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
   };
 
   const openSetup = (userSnapshot: any) => {
-    console.log('[LoginModal] openSetup called with:', userSnapshot);
     setPendingUser(userSnapshot);
     setStage('setup');
   };
 
-  const goToDashboard = (role: UserRole) => {
+  /** Maps user roles & executive flags to exact App.tsx routes */
+  const goToDashboard = (role: UserRole | string, isExecutive = false) => {
     setStage('done');
     onOpenChange(false);
-    navigate(`/dashboard/${role}`);
-  };
 
+    if (isExecutive || role === 'executive' || role === 'exco') {
+      navigate('/dashboard/exco');
+      return;
+    }
+
+    if (role === 'coach') {
+      navigate('/dashboard/coach');
+      return;
+    }
+
+    navigate('/dashboard/referee');
+  };
 
   /** Look for a legacy profile: by doc ID first, then by uid/email fields. */
   const findLegacyProfile = async (uid: string, email: string | null) => {
     const sources: { col: string; role: UserRole }[] = [
+      { col: 'executives', role: 'executive' as UserRole },
       { col: 'coaches', role: 'coach' },
       { col: 'referees', role: 'referee' },
-      { col: 'executives', role: 'executive' as UserRole },
     ];
 
     for (const src of sources) {
-      // 1. Doc keyed by UID
       try {
         const snap = await getDoc(doc(db, src.col, uid));
         if (snap.exists()) {
@@ -94,7 +97,6 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
         }
       } catch { /* denied or missing — keep looking */ }
 
-      // 2. Doc with uid stored as a field
       try {
         const byUid = await getDocs(query(
           collection(db, src.col), where('uid', '==', uid), limit(1)
@@ -104,7 +106,6 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
         }
       } catch { /* keep looking */ }
 
-      // 3. Doc matched by email
       if (email) {
         try {
           const byEmail = await getDocs(query(
@@ -132,12 +133,10 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
 
       if (!snap.exists()) {
         if (!isNewRegistration) {
-          // ── LEGACY FALLBACK ─────────────────────────────────────────────
-          // Returning user with no users/{uid} doc: check the old per-role
-          // collections and migrate them forward before giving up.
           const legacy: any = await findLegacyProfile(firebaseUser.uid, firebaseUser.email);
 
           if (legacy) {
+            const legacyExec = legacy.role === 'executive' || legacy.isExecutive === true;
             const migrated = {
               uid: firebaseUser.uid,
               email: firebaseUser.email,
@@ -145,6 +144,7 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
                 legacy.full_name || legacy.name ||
                 firebaseUser.displayName || '',
               role: legacy.role,
+              ...(legacyExec ? { isExecutive: true } : {}),
               isNewUser: false,
               profileIncomplete: false,
               status: 'active',
@@ -154,11 +154,10 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
             };
 
             await setDoc(userRef, migrated);
-            goToDashboard(legacy.role);
+            goToDashboard(legacy.role, legacyExec);
             return;
           }
 
-          // Genuinely no profile anywhere — keep the guard.
           toast({
             title: 'Profile data not found',
             description:
@@ -169,14 +168,16 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
           return;
         }
 
-        // Genuinely new registration — create skeleton as before
+        const isCoach = intendedRole === 'coach';
+
         const skeleton = {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           full_name: fullName || firebaseUser.displayName || '',
           role: intendedRole,
-          isNewUser: true,
-          profileIncomplete: true,
+          isNewUser: !isCoach,
+          profileIncomplete: !isCoach,
+          ...(isCoach ? { setupCompleted: true } : {}),
           status: 'active',
           approved: true,
           createdAt: serverTimestamp(),
@@ -184,7 +185,9 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
 
         await setDoc(userRef, skeleton);
 
-        if (intendedRole === 'referee') {
+        if (isCoach) {
+          goToDashboard('coach');
+        } else if (intendedRole === 'referee') {
           openSetup(skeleton);
         } else {
           openRolePicker(skeleton);
@@ -193,6 +196,14 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
       }
 
       const data = snap.data();
+      const userIsExec =
+        data.isExecutive === true || data.role === 'executive' || data.role === 'exco';
+
+      // Route executives / exco committee members first
+      if (userIsExec) {
+        goToDashboard(data.role || 'executive', true);
+        return;
+      }
 
       if (!data.role) {
         openRolePicker(data);
@@ -222,8 +233,6 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
   };
 
   const handleRoleChosen = async (role: UserRole, skipped = false) => {
-    // console.log('[LoginModal] handleRoleChosen fired —', { role, skipped, pendingUser });
-
     if (!pendingUser) {
       console.warn('[LoginModal] handleRoleChosen aborted: pendingUser is null');
       return;
@@ -239,7 +248,6 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
           profileIncomplete: false,
           setupCompleted: true,
         });
-        // console.log('[LoginModal] coach updateDoc succeeded, going to dashboard');
         goToDashboard('coach');
       } else {
         await updateDoc(userRef, {
@@ -247,11 +255,9 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
           isNewUser: true,
           profileIncomplete: true,
         });
-        // console.log('[LoginModal] referee updateDoc succeeded, calling openSetup');
         openSetup({ ...pendingUser, role });
       }
     } catch (error: any) {
-      // console.error('[LoginModal] handleRoleChosen updateDoc threw:', error);
       toast({ title: 'Could not save role', description: error.message, variant: 'destructive' });
       setStage('role-select');
     }
@@ -260,7 +266,7 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
   const handleSetupComplete = async () => {
     if (!pendingUser?.uid) return;
 
-    const userRef = doc(db, "users", pendingUser.uid);
+    const userRef = doc(db, 'users', pendingUser.uid);
 
     try {
       await updateDoc(userRef, {
@@ -269,13 +275,14 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
       });
 
       const snap = await getDoc(userRef);
-      const role = snap.data()?.role as UserRole;
+      const data = snap.data();
+      const role = data?.role as UserRole;
 
-      if (!role) {
+      if (!role && !data?.isExecutive) {
         throw new Error('No role found on user document after setup.');
       }
 
-      goToDashboard(role);
+      goToDashboard(role, data?.isExecutive === true);
     } catch (error: any) {
       console.error('handleSetupComplete failed:', error);
       toast({ title: 'Could not finish setup', description: error.message, variant: 'destructive' });
@@ -289,7 +296,8 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
-      await handleUserRouting(result.user, tab === 'signup');
+      const isSignup = tab === 'signup';
+      await handleUserRouting(result.user, isSignup, isSignup ? selectedRole : null);
     } catch (err: any) {
       toast({ title: 'Auth error', description: err.message, variant: 'destructive' });
     } finally {
@@ -316,8 +324,8 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
     setLoading(true);
     setStatusMessage(null);
     try {
-      const result = await signUp(email, password, fullName, 'referee');
-      await handleUserRouting(result.user, true, 'referee');
+      const result = await signUp(email, password, fullName, selectedRole);
+      await handleUserRouting(result.user, true, selectedRole);
     } catch (err: any) {
       toast({ title: 'Signup failed', description: err.message, variant: 'destructive' });
     } finally {
@@ -397,6 +405,31 @@ const LoginModal: React.FC<Props> = ({ open, onOpenChange }) => {
 
             <TabsContent value="signup">
               <form onSubmit={handleSignup} className="space-y-4 mt-4">
+                <div>
+                  <Label className="mb-1.5 block">Register As</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRole('referee')}
+                      className={`py-2 px-3 rounded-md border text-sm font-medium transition-colors ${selectedRole === 'referee'
+                        ? 'bg-[#006747] text-white border-[#006747]'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        }`}
+                    >
+                      Referee
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRole('coach')}
+                      className={`py-2 px-3 rounded-md border text-sm font-medium transition-colors ${selectedRole === 'coach'
+                        ? 'bg-[#006747] text-white border-[#006747]'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        }`}
+                    >
+                      Coach
+                    </button>
+                  </div>
+                </div>
                 <div>
                   <Label>Full Name</Label>
                   <Input required value={fullName} onChange={(e) => setFullName(e.target.value)} />
