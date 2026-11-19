@@ -7,8 +7,9 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
-import CoachDashboard from './components/dashboard/CoachDashboard';
+import ExcoDashboard from './components/dashboard/ExcoDashboard';
 import RefereeDashboard from './components/dashboard/RefereeDashboard';
+import CoachDashboard from './components/dashboard/CoachDashboard';
 import { AuthProvider } from "./contexts/AuthContext";
 
 
@@ -25,8 +26,9 @@ const App = () => (
           <AuthProvider>  {/* ← wrap everything here */}
             <Routes>
               <Route path="/" element={<Index />} />
-              <Route path="/dashboard/coach" element={<CoachDashboard />} />
+              <Route path="/dashboard/exco" element={<ExcoDashboard />} />
               <Route path="/dashboard/referee" element={<RefereeDashboard />} />
+              <Route path="/dashboard/coach" element={<CoachDashboard />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AuthProvider>  {/* ← close here */}

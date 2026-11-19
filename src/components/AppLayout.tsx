@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import Hero from './Hero';
-import CoachDashboard from './dashboard/CoachDashboard';
+import CoachDashboard from './dashboard/ExcoDashboard';
 import RefereeDashboard from './dashboard/RefereeDashboard';
 import { Loader2 } from 'lucide-react';
 
